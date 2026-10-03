@@ -8,8 +8,13 @@ from datetime import timedelta
 from decouple import config, Csv
 
 # Build paths
-BASE_DIR = Path(__file__).resolve().parent.parent
+import sys
+BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR
+
+# Add current directory to Python path for module imports
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 # Security
 SECRET_KEY = config('SECRET_KEY', default='dev-key-change-in-production')

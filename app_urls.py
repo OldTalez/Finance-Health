@@ -4,7 +4,7 @@ App-level URL routing for all Finance Platform endpoints
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from . import views
+import views
 
 # Create router for ViewSets
 router = DefaultRouter()
@@ -27,7 +27,7 @@ analytics_patterns = [
 ]
 
 # Import/Upload URLs
-from .upload_views import UploadView
+from upload_views import UploadView
 
 import_patterns = [
     path('upload/', UploadView.as_view(), name='upload'),
