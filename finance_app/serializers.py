@@ -8,7 +8,7 @@ from django.utils import timezone
 from datetime import timedelta
 import re
 
-from models import (
+from .models import (
     User, RefreshToken, Account, Statement, Category, Rule,
     Transaction, RecurringCharge, ImportLog, AuditLog
 )

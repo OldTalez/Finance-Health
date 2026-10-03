@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'drf_spectacular',
+    'finance_app',
 ]
 
 # Middleware
@@ -61,7 +62,7 @@ MIDDLEWARE = [
 ]
 
 # URL routing
-ROOT_URLCONF = 'urls'
+ROOT_URLCONF = 'finance_app.urls'
 
 # Templates (minimal, mostly API)
 TEMPLATES = [
@@ -121,7 +122,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ============ REST Framework Configuration ============
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'utils.JWTAuthentication',
+        'finance_app.utils.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',

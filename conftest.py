@@ -8,7 +8,7 @@ from django.test import Client
 from rest_framework.test import APIClient
 from decimal import Decimal
 
-from models import Account, Category, Rule, Transaction, Statement
+from finance_app.models import Account, Category, Rule, Transaction, Statement
 
 User = get_user_model()
 
@@ -40,7 +40,7 @@ def user2(db):
 @pytest.fixture
 def authenticated_client(api_client, user):
     """API client authenticated as test user"""
-    from .utils import JWTUtils
+    from finance_app.utils import JWTUtils
     access_token, refresh_token, _ = JWTUtils.generate_tokens(user)
     api_client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
     return api_client

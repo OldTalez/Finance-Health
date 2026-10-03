@@ -9,9 +9,9 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction
 import logging
 
-from models import Account, Statement, Transaction, Category, ImportLog, AuditLog
-from parsers import StatementParser, Deduplicator
-from utils import AuditLogger
+from .models import Account, Statement, Transaction, Category, ImportLog, AuditLog
+from .parsers import StatementParser, Deduplicator
+from .utils import AuditLogger
 
 logger = logging.getLogger(__name__)
 
