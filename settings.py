@@ -19,7 +19,11 @@ if str(BASE_DIR) not in sys.path:
 # Security
 SECRET_KEY = config('SECRET_KEY', default='dev-key-change-in-production')
 DEBUG = config('DEBUG', default=True, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,*.railway.app,finance-health-production-f96f.up.railway.app', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,.railway.app,finance-health-production-f96f.up.railway.app', cast=Csv())
+# Railway injects the service's public domain; always allow it
+_railway_domain = config('RAILWAY_PUBLIC_DOMAIN', default='')
+if _railway_domain and _railway_domain not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_railway_domain)
 
 # Database
 DATABASES = {
@@ -170,6 +174,9 @@ JWT_EXPIRY = timedelta(minutes=int(config('JWT_EXPIRY_MINUTES', default='15')))
 REFRESH_TOKEN_EXPIRY = timedelta(days=int(config('REFRESH_TOKEN_DAYS', default='7')))
 
 # ============ Security Settings ============
+# Railway terminates TLS at its proxy and forwards plain HTTP to gunicorn; trust its header
+# so Django knows the original request was HTTPS (otherwise SSL redirect loops forever)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
 SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=False, cast=bool)
 CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=False, cast=bool)
