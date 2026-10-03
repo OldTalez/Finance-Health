@@ -19,7 +19,7 @@ if str(BASE_DIR) not in sys.path:
 # Security
 SECRET_KEY = config('SECRET_KEY', default='dev-key-change-in-production')
 DEBUG = config('DEBUG', default=True, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,*.railway.app,finance-health-production-f96f.up.railway.app', cast=Csv())
 
 # Database
 DATABASES = {
