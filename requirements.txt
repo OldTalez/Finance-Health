@@ -31,6 +31,9 @@ python-dateutil==2.8.2
 # API Documentation
 drf-spectacular==0.26.5
 
+# Filtering & Search
+django-filter==23.5
+
 # Rate Limiting
 django-ratelimit==4.1.0
 
