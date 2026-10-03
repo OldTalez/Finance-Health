@@ -1,0 +1,47 @@
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Django
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Static files
+/static/
+/media/
+
+# Node (if using)
+node_modules/
+package-lock.json

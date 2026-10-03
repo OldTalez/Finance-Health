@@ -1,0 +1,56 @@
+{
+  "name": "finance-platform-api",
+  "version": "1.0.0-phase-1",
+  "description": "Finance + Investing Platform Backend — Phase 1 (Django + DRF)",
+  "main": "manage.py",
+  "scripts": {
+    "start": "python manage.py runserver 0.0.0.0:8000",
+    "migrate": "python manage.py migrate",
+    "makemigrations": "python manage.py makemigrations",
+    "test": "pytest",
+    "test:cov": "pytest --cov=src",
+    "lint": "flake8 src",
+    "format": "black src",
+    "createsuperuser": "python manage.py createsuperuser",
+    "shell": "python manage.py shell"
+  },
+  "keywords": [
+    "finance",
+    "banking",
+    "transactions",
+    "budgeting"
+  ],
+  "author": "Kennedy / Atlas",
+  "license": "MIT",
+  "python": ">=3.10",
+  "dependencies": {
+    "django": "^4.2",
+    "djangorestframework": "^3.14",
+    "django-cors-headers": "^4.0",
+    "django-environ": "^0.10",
+    "psycopg2-binary": "^2.9",
+    "python-decouple": "^3.7",
+    "PyJWT": "^2.8",
+    "cryptography": "^41.0",
+    "pydantic": "^2.0",
+    "python-dateutil": "^2.8",
+    "pillow": "^10.0",
+    "PyPDF2": "^3.0",
+    "pypdf": "^3.0",
+    "pdf2image": "^1.16",
+    "pytesseract": "^0.3",
+    "openpyxl": "^3.1",
+    "drf-spectacular": "^0.26",
+    "django-ratelimit": "^4.0",
+    "gunicorn": "^21.0"
+  },
+  "dev-dependencies": {
+    "pytest": "^7.4",
+    "pytest-django": "^4.5",
+    "pytest-cov": "^4.1",
+    "factory-boy": "^3.3",
+    "flake8": "^6.0",
+    "black": "^23.0",
+    "isort": "^5.12"
+  }
+}
