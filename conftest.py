@@ -8,7 +8,7 @@ from django.test import Client
 from rest_framework.test import APIClient
 from decimal import Decimal
 
-from models import Account, Category, Rule, Transaction, Statement
+from .models import Account, Category, Rule, Transaction, Statement
 
 User = get_user_model()
 

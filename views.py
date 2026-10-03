@@ -13,16 +13,16 @@ from datetime import timedelta, datetime
 from decimal import Decimal
 import logging
 
-from models import (
+from .models import (
     User, Account, Statement, Category, Rule, Transaction,
     RecurringCharge, ImportLog, AuditLog, RefreshToken
 )
-from serializers import (
+from .serializers import (
     UserSerializer, RegisterSerializer, LoginSerializer, TokenSerializer,
     AccountSerializer, TransactionSerializer, CategorySerializer, RuleSerializer,
     DashboardSerializer, RecurringChargeSerializer, ImportLogSerializer
 )
-from utils import JWTUtils, AuditLogger
+from .utils import JWTUtils, AuditLogger
 
 logger = logging.getLogger(__name__)
 

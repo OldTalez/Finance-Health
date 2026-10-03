@@ -48,7 +48,7 @@ class JWTUtils:
         refresh_token = jwt.encode(refresh_payload, cls.SECRET, algorithm=cls.ALGORITHM)
 
         # Store refresh token in DB for revocation
-        from models import RefreshToken
+        from .models import RefreshToken
         RefreshToken.objects.create(
             user=user,
             token=refresh_token,
