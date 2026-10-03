@@ -2,5 +2,5 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "gunicorn wsgi --log-file -"
+startCommand = "gunicorn wsgi --bind 0.0.0.0:8000 --log-file -"
 restartPolicyMaxRetries = 5
