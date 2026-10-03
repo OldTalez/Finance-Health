@@ -41,13 +41,6 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'drf_spectacular',
-    'src.apps.auth',
-    'src.apps.accounts',
-    'src.apps.transactions',
-    'src.apps.import_statements',
-    'src.apps.categories',
-    'src.apps.analytics',
-    'src.apps.audit',
 ]
 
 # Middleware
@@ -60,12 +53,10 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'src.middleware.RateLimitMiddleware',
-    'src.middleware.AuditLoggingMiddleware',
 ]
 
 # URL routing
-ROOT_URLCONF = 'src.urls'
+ROOT_URLCONF = 'urls'
 
 # Templates (minimal, mostly API)
 TEMPLATES = [
@@ -85,7 +76,7 @@ TEMPLATES = [
 ]
 
 # WSGI
-WSGI_APPLICATION = 'src.wsgi.application'
+WSGI_APPLICATION = 'wsgi.application'
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -125,7 +116,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ============ REST Framework Configuration ============
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'src.utils.jwt_utils.JWTAuthentication',
+        'utils.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
