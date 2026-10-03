@@ -155,7 +155,7 @@ class PDFParser:
         amount_pattern = r'([-+]?\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?)'
 
         # Global scan for "date date description amount" pattern
-        pattern = rf'{date_pattern}\s+{date_pattern}\s+([A-Za-z0-9\s\-\.,']+?)\s+{amount_pattern}(?:\s|$)'
+        pattern = rf"{date_pattern}\s+{date_pattern}\s+([A-Za-z0-9\s\-\.,']+?)\s+{amount_pattern}(?:\s|$)"
 
         for match in re.finditer(pattern, text):
             try:
@@ -195,7 +195,7 @@ class PDFParser:
         transactions = []
 
         # Pattern: two dates, description, two amounts (no sign)
-        pattern = r'(\d{1,2}[-/]\d{1,2}[-/]\d{4})\s+(\d{1,2}[-/]\d{1,2}[-/]\d{4})\s+([A-Za-z0-9\s\-\.,']+?)\s+(\d+\.?\d*)\s+(\d+\.?\d*)'
+        pattern = r"(\d{1,2}[-/]\d{1,2}[-/]\d{4})\s+(\d{1,2}[-/]\d{1,2}[-/]\d{4})\s+([A-Za-z0-9\s\-\.,']+?)\s+(\d+\.?\d*)\s+(\d+\.?\d*)"
 
         for match in re.finditer(pattern, text):
             try:
@@ -230,7 +230,7 @@ class PDFParser:
         """
         transactions = []
 
-        pattern = r'(\d{4}-\d{2}-\d{2})\s+([A-Za-z0-9\s\-\.,']+?)\s+(\d+\.?\d*)\s+(\d+\.?\d*)'
+        pattern = r"(\d{4}-\d{2}-\d{2})\s+([A-Za-z0-9\s\-\.,']+?)\s+(\d+\.?\d*)\s+(\d+\.?\d*)"
 
         prev_balance = None
         for match in re.finditer(pattern, text):
@@ -270,7 +270,7 @@ class PDFParser:
         transactions = []
 
         # TD format: description, amount, short date (MMMDD)
-        pattern = r'([A-Za-z0-9\s\-\.,']+?)\s+(\d+\.?\d*)\s+((?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2})'
+        pattern = r"([A-Za-z0-9\s\-\.,']+?)\s+(\d+\.?\d*)\s+((?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2})"
 
         current_year = datetime.now().year
         for match in re.finditer(pattern, text, re.IGNORECASE):
