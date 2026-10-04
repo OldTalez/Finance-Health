@@ -21,7 +21,7 @@ bcrypt==4.1.1
 PyPDF2==3.0.1
 pdf2image==1.16.3
 pytesseract==0.3.10
-Pillow==10.1.0
+Pillow==11.0.0
 
 # CSV & Data Processing
 openpyxl==3.1.2
