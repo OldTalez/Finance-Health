@@ -128,6 +128,7 @@ class CategorySerializer(serializers.ModelSerializer):
 # ============ RULE SERIALIZERS ============
 
 class RuleSerializer(serializers.ModelSerializer):
+    category_id = serializers.IntegerField(write_only=True)
     category_name = serializers.CharField(source='category.name', read_only=True)
 
     class Meta:
@@ -137,6 +138,12 @@ class RuleSerializer(serializers.ModelSerializer):
             'priority', 'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        category_id = validated_data.pop('category_id')
+        category = Category.objects.get(id=category_id)
+        validated_data['category'] = category
+        return super().create(validated_data)
 
 
 # ============ TRANSACTION SERIALIZERS ============

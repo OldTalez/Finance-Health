@@ -268,7 +268,7 @@ class TestPermissions:
     def test_user_isolation(self, authenticated_client, user, account, user2):
         """Test that users can't access each other's data"""
         # Login as user2
-        from .utils import JWTUtils
+        from finance_app.utils import JWTUtils
         access_token, _, _ = JWTUtils.generate_tokens(user2)
         authenticated_client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
 
