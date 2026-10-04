@@ -2,19 +2,19 @@
 # Python 3.10+
 
 # Django & DRF
-Django==4.2.7
+Django==5.2.17
 djangorestframework==3.14.0
 django-cors-headers==4.3.1
 django-environ==0.10.0
 python-decouple==3.8
 
 # Database
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.13
 dj-database-url==2.1.0
 
 # Authentication & Security
 PyJWT==2.15.1
-cryptography==41.0.7
+cryptography==50.0.2
 bcrypt==4.1.1
 
 # PDF & Document Processing
@@ -53,6 +53,6 @@ factory-boy==3.3.0
 faker==21.0.0
 
 # Code Quality (optional, for local development)
-black==23.12.1
+black==26.5.1
 flake8==6.1.0
 isort==5.13.2
