@@ -4,7 +4,7 @@ Centralized model definitions for all apps
 """
 
 from django.db import models
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.utils import timezone
 from django.core.validators import EmailValidator, MinLengthValidator
 import hashlib
@@ -23,6 +23,10 @@ class User(AbstractUser):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # Override groups and user_permissions with explicit related_name to avoid clash with auth.User
+    groups = models.ManyToManyField(Group, related_name='finance_app_users', blank=True)
+    user_permissions = models.ManyToManyField(Permission, related_name='finance_app_users', blank=True)
 
     class Meta:
         db_table = 'users'
