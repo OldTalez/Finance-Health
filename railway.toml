@@ -2,5 +2,5 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "python manage.py migrate && gunicorn wsgi --bind 0.0.0.0:8000 --log-file -"
+startCommand = "python manage.py collectstatic --noinput --clear && python manage.py migrate && gunicorn wsgi --bind 0.0.0.0:8000 --log-file -"
 restartPolicyMaxRetries = 5
