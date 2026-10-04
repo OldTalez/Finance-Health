@@ -15,14 +15,15 @@ User = get_user_model()
 # ============ USER & AUTH FIXTURES ============
 
 @pytest.fixture
-def api_client():
-    """DRF API client"""
+def api_client(db):
+    """DRF API client with database access"""
     return APIClient()
 
 @pytest.fixture
 def user(db):
     """Create a test user"""
     return User.objects.create_user(
+        username='test@example.com',
         email='test@example.com',
         password='TestPassword123!',
         full_name='Test User'
@@ -32,6 +33,7 @@ def user(db):
 def user2(db):
     """Create a second test user (for isolation testing)"""
     return User.objects.create_user(
+        username='test2@example.com',
         email='test2@example.com',
         password='TestPassword123!',
         full_name='Test User 2'

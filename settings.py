@@ -9,6 +9,8 @@ from decouple import config, Csv
 
 # Build paths
 import sys
+
+# Build paths
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR
 
@@ -62,6 +64,9 @@ INSTALLED_APPS = [
     'finance_app',
 ]
 
+# Auth user model
+AUTH_USER_MODEL = 'finance_app.User'
+
 # Middleware
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -75,7 +80,7 @@ MIDDLEWARE = [
 ]
 
 # URL routing
-ROOT_URLCONF = 'finance_app.urls'
+ROOT_URLCONF = 'urls'
 
 # Templates (minimal, mostly API)
 TEMPLATES = [

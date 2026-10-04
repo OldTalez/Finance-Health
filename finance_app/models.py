@@ -4,13 +4,32 @@ Centralized model definitions for all apps
 """
 
 from django.db import models
-from django.contrib.auth.models import AbstractUser, Group, Permission
+from django.contrib.auth.models import AbstractUser, Group, Permission, UserManager
 from django.utils import timezone
 from django.core.validators import EmailValidator, MinLengthValidator
 import hashlib
 import json
 
 # ===================== AUTH =====================
+class CustomUserManager(UserManager):
+    """Custom user manager using email instead of username"""
+    def create_user(self, username=None, email=None, password=None, **extra_fields):
+        if not email:
+            raise ValueError('Email is required')
+        email = self.normalize_email(email)
+        # Use email as username if not provided
+        username = username or email
+        user = self.model(username=username, email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, username=None, email=None, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        return self.create_user(username, email, password, **extra_fields)
+
+
 class User(AbstractUser):
     """Extended user model with finance-specific fields"""
     email = models.EmailField(unique=True, validators=[EmailValidator()])
@@ -27,6 +46,8 @@ class User(AbstractUser):
     # Override groups and user_permissions with explicit related_name to avoid clash with auth.User
     groups = models.ManyToManyField(Group, related_name='finance_app_users', blank=True)
     user_permissions = models.ManyToManyField(Permission, related_name='finance_app_users', blank=True)
+
+    objects = CustomUserManager()
 
     class Meta:
         db_table = 'users'
@@ -332,7 +353,7 @@ class AuditLog(models.Model):
     details = models.JSONField(default=dict, blank=True)  # Extra context as JSON
 
     ip_address = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.TextField(blank=True)
+    user_agent = models.TextField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

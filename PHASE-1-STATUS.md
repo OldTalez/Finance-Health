@@ -242,6 +242,21 @@ Company/Work/T-009/atlas-phase-1/
 
 ---
 
-**Last Updated:** 2026-10-03  
+## 🚀 Deployment Update (2026-10-04)
+
+Railway deploy debugging on `OldTalez/Finance-Health` (`main`, latest commit `606a056`):
+
+- [x] `parsers.py`: four regex strings contained a bare apostrophe inside single quotes (lines 158, 198, 233, 273). Switched to double-quoted strings. This had been breaking the `urls.py` → `upload_views.py` → `parsers.py` import and returning 500 on every request.
+- [x] `settings.py`: `DATABASE_URL` is now honoured (via `dj-database-url`), falling back to the `DB_*` variables.
+- [x] `settings.py`: `ALLOWED_HOSTS` default uses Django's `.railway.app` wildcard and adds `RAILWAY_PUBLIC_DOMAIN`.
+- [x] `settings.py`: `SECURE_PROXY_SSL_HEADER` set so `SECURE_SSL_REDIRECT` does not loop behind Railway's proxy.
+- [ ] Railway `DATABASE_URL` variable still contains placeholder text; must be re-added as a reference to the Postgres service. Until then every request fails with "Please supply the NAME".
+- [ ] `SECRET_KEY`, `JWT_SECRET`, `ENCRYPTION_KEY` still hold template values in Railway.
+- [ ] No `finance_app/migrations/` folder exists, so `migrate` will not create the app tables. Needs `makemigrations`, a check against `schema.sql` and the custom user model, and a `migrate` step in `railway.toml`.
+- [ ] `pytest` has not yet passed.
+
+---
+
+**Last Updated:** 2026-10-04  
 **Expected Completion:** 2026-10-24  
 **Effort So Far:** ~8K tokens (Phase 1 budget: ~20K)

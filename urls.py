@@ -19,7 +19,7 @@ urlpatterns = [
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc-ui'),
 
     # API v1 - All Finance Platform endpoints
-    path('api/v1/', include('app_urls')),
+    path('api/v1/', include('finance_app.urls')),
 
     # Health check endpoint (for monitoring/uptime checks)
     path('health/', lambda request: HttpResponse('OK'), name='health'),
