@@ -9,7 +9,9 @@ from django.utils import timezone
 from django.core.validators import EmailValidator, MinLengthValidator
 import hashlib
 import json
+import secrets
 import uuid
+from datetime import timedelta
 
 # ===================== AUTH =====================
 class CustomUserManager(UserManager):
@@ -94,6 +96,66 @@ class LoginFailure(models.Model):
 
     class Meta:
         db_table = 'login_failures'
+
+
+class InviteCode(models.Model):
+    """
+    Single-use registration invite. Sign-up is invite-only (Board ruling).
+
+    Only the SHA-256 hash of the code is stored; the plain code is shown once,
+    when an admin (or the create_invite command) issues it.
+    """
+    code_hash = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=100, blank=True, help_text='Who this invite is for (note to self).')
+    expires_at = models.DateTimeField(null=True, blank=True, help_text='Leave empty for no expiry.')
+    used_at = models.DateTimeField(null=True, blank=True)
+    used_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='invite_used'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'invite_codes'
+
+    def __str__(self):
+        state = 'used' if self.used_at else 'unused'
+        return f'Invite {self.label or self.pk} ({state})'
+
+    @staticmethod
+    def hash_code(code):
+        return hashlib.sha256(code.strip().encode('utf-8')).hexdigest()
+
+    @classmethod
+    def issue(cls, label='', days=None):
+        """Create an invite. Returns (invite, plain_code); the plain code is not recoverable later."""
+        code = secrets.token_urlsafe(18)
+        expires_at = timezone.now() + timedelta(days=days) if days else None
+        invite = cls.objects.create(code_hash=cls.hash_code(code), label=label, expires_at=expires_at)
+        return invite, code
+
+    @classmethod
+    def _usable(cls, code):
+        if not code or not isinstance(code, str) or len(code) > 200:
+            return cls.objects.none()
+        now = timezone.now()
+        return cls.objects.filter(code_hash=cls.hash_code(code), used_at__isnull=True).filter(
+            models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
+        )
+
+    @classmethod
+    def is_usable(cls, code):
+        return cls._usable(code).exists()
+
+    @classmethod
+    def claim(cls, code):
+        """Atomically mark the code used. Returns the invite, or None if missing, used or expired."""
+        usable = cls._usable(code)
+        pk = usable.values_list('pk', flat=True).first()
+        if pk is None:
+            return None
+        # The filter repeats the usable conditions, so two racing requests cannot both win
+        won = usable.filter(pk=pk).update(used_at=timezone.now())
+        return cls.objects.get(pk=pk) if won == 1 else None
 
 
 # ===================== ACCOUNTS =====================

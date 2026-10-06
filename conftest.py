@@ -55,6 +55,13 @@ def authenticated_client(api_client, user):
     api_client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
     return api_client
 
+@pytest.fixture
+def invite_code(db):
+    """A fresh single-use registration invite; returns the plain code."""
+    from finance_app.models import InviteCode
+    _, code = InviteCode.issue(label='test invite')
+    return code
+
 # ============ ACCOUNT FIXTURES ============
 
 @pytest.fixture

@@ -9,6 +9,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Q, Sum, Case, When, DecimalField, Count
 from datetime import timedelta, datetime
 from decimal import Decimal
@@ -16,7 +17,7 @@ import logging
 
 from .models import (
     User, Account, Statement, Category, Rule, Transaction,
-    RecurringCharge, ImportLog, AuditLog, RefreshToken
+    RecurringCharge, ImportLog, AuditLog, RefreshToken, InviteCode
 )
 from .serializers import (
     UserSerializer, RegisterSerializer, LoginSerializer, TokenSerializer,
@@ -35,17 +36,33 @@ class RegisterView(views.APIView):
     throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
     throttle_scope = 'register'
 
+    INVALID_INVITE = {'detail': 'Invalid or expired invite code.'}
+
     def post(self, request):
+        # Invite-only sign-up. One generic answer for missing, used, expired or wrong
+        # codes, so the response says nothing about which case it was.
+        invite_code = request.data.get('invite_code') if hasattr(request.data, 'get') else None
+        if not InviteCode.is_usable(invite_code):
+            return Response(self.INVALID_INVITE, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = RegisterSerializer(data=request.data)
-        if serializer.is_valid():
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            invite = InviteCode.claim(invite_code)
+            if invite is None:  # lost a race for the same code
+                return Response(self.INVALID_INVITE, status=status.HTTP_400_BAD_REQUEST)
             user = serializer.save()
-            # Log audit event
-            AuditLogger.log(user, 'register', 'user', user.id, {'email': user.email})
-            return Response(
-                UserSerializer(user).data,
-                status=status.HTTP_201_CREATED
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            invite.used_by = user
+            invite.save(update_fields=['used_by'])
+
+        # Log audit event
+        AuditLogger.log(user, 'register', 'user', user.id, {'email': user.email})
+        return Response(
+            UserSerializer(user).data,
+            status=status.HTTP_201_CREATED
+        )
 
 
 class LoginView(views.APIView):

@@ -31,8 +31,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ['email', 'password', 'password_confirm', 'full_name']
 
     def validate_email(self, value):
+        # Generic wording: never confirm to a caller that an address is already registered
         if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Email already registered.")
+            raise serializers.ValidationError("Registration could not be completed.")
         return value
 
     def validate_password(self, value):
