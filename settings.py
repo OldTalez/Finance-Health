@@ -175,9 +175,21 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
         'user': '1000/hour',
-        'auth_failed': '5/15m',  # 5 failed logins per 15 minutes
-    }
+        'login': '20/hour',      # per client address, on POST /auth/login/
+        'register': '10/hour',   # per client address, on POST /auth/register/
+        'logout': '60/hour',
+        'refresh': '120/hour',
+    },
+    # Number of reverse proxies in front of the app. Railway adds one. DRF then
+    # takes the client address from the right-hand end of X-Forwarded-For, which
+    # the proxy wrote, instead of trusting the client-controlled left-hand end.
+    'NUM_PROXIES': int(config('NUM_PROXIES', default='1')),
 }
+
+# Per-account lockout after repeated failed logins (stored in the database so it
+# is shared by every worker and survives restarts).
+LOGIN_LOCKOUT_ATTEMPTS = int(config('LOGIN_LOCKOUT_ATTEMPTS', default='5'))
+LOGIN_LOCKOUT_MINUTES = int(config('LOGIN_LOCKOUT_MINUTES', default='15'))
 
 # ============ CORS Configuration ============
 CORS_ALLOWED_ORIGINS = config(

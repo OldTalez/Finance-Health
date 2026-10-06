@@ -185,6 +185,51 @@ class EncryptionUtils:
         return ciphertext
 
 
+# ============ LOGIN LOCKOUT ============
+
+class LoginLockout:
+    """
+    Per-account lockout: after LOGIN_LOCKOUT_ATTEMPTS failures inside
+    LOGIN_LOCKOUT_MINUTES the account refuses logins until the oldest counted
+    failure ages out. Failures are recorded for unknown emails too, so the
+    response never reveals whether an account exists.
+    """
+
+    @staticmethod
+    def _key(email):
+        return str(email or '').strip().lower()[:254]
+
+    @classmethod
+    def _window_start(cls):
+        return timezone.now() - timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+
+    @classmethod
+    def is_locked(cls, email):
+        from .models import LoginFailure
+        key = cls._key(email)
+        if not key:
+            return False
+        recent = LoginFailure.objects.filter(email=key, created_at__gte=cls._window_start()).count()
+        return recent >= settings.LOGIN_LOCKOUT_ATTEMPTS
+
+    @classmethod
+    def record_failure(cls, email):
+        from .models import LoginFailure
+        key = cls._key(email)
+        if not key:
+            return
+        LoginFailure.objects.create(email=key)
+        # Housekeeping: drop rows that no longer count toward any lockout
+        LoginFailure.objects.filter(created_at__lt=cls._window_start()).delete()
+
+    @classmethod
+    def clear(cls, email):
+        from .models import LoginFailure
+        key = cls._key(email)
+        if key:
+            LoginFailure.objects.filter(email=key).delete()
+
+
 # ============ AUDIT LOGGING ============
 
 class AuditLogger:

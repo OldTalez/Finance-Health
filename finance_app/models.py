@@ -87,6 +87,15 @@ class RefreshToken(models.Model):
         return hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
 
 
+class LoginFailure(models.Model):
+    """One failed login attempt, keyed by the (lower-cased) email that was tried."""
+    email = models.CharField(max_length=254, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'login_failures'
+
+
 # ===================== ACCOUNTS =====================
 class Account(models.Model):
     """User's bank accounts (credit cards, debit accounts, savings)"""

@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from django.utils import timezone
 from django.db.models import Q, Sum, Case, When, DecimalField, Count
 from datetime import timedelta, datetime
@@ -22,7 +23,7 @@ from .serializers import (
     AccountSerializer, TransactionSerializer, CategorySerializer, RuleSerializer,
     DashboardSerializer, RecurringChargeSerializer, ImportLogSerializer
 )
-from .utils import JWTUtils, AuditLogger
+from .utils import JWTUtils, AuditLogger, LoginLockout
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 class RegisterView(views.APIView):
     """User registration endpoint"""
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'register'
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -46,13 +49,24 @@ class RegisterView(views.APIView):
 
 
 class LoginView(views.APIView):
-    """User login endpoint — returns JWT tokens"""
+    """User login endpoint - returns JWT tokens"""
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'login'
 
     def post(self, request):
+        raw_email = request.data.get('email') if hasattr(request.data, 'get') else None
+
+        if LoginLockout.is_locked(raw_email):
+            return Response(
+                {'detail': 'Too many failed attempts. Try again later.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
+
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
+            LoginLockout.clear(raw_email)
 
             # Generate JWT tokens
             access_token, refresh_token, expires_in = JWTUtils.generate_tokens(user)
@@ -67,6 +81,7 @@ class LoginView(views.APIView):
                 'token_type': 'Bearer'
             }, status=status.HTTP_200_OK)
 
+        LoginLockout.record_failure(raw_email)
         return Response(serializer.errors, status=status.HTTP_401_UNAUTHORIZED)
 
     def get_client_ip(self):
@@ -79,6 +94,8 @@ class LoginView(views.APIView):
 class RefreshTokenView(views.APIView):
     """Refresh expired access token"""
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'refresh'
 
     def post(self, request):
         refresh_token = request.data.get('refresh_token')
@@ -106,6 +123,8 @@ class RefreshTokenView(views.APIView):
 class LogoutView(views.APIView):
     """Revoke a refresh token (and its rotation family)"""
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'logout'
 
     def post(self, request):
         refresh_token = request.data.get('refresh_token')

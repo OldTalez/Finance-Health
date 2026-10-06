@@ -12,6 +12,14 @@ from finance_app.models import Account, Category, Rule, Transaction, Statement
 
 User = get_user_model()
 
+@pytest.fixture(autouse=True)
+def clear_throttle_cache():
+    """Throttle counters live in the cache; reset between tests so they never leak."""
+    from django.core.cache import cache
+    cache.clear()
+    yield
+    cache.clear()
+
 # ============ USER & AUTH FIXTURES ============
 
 @pytest.fixture
