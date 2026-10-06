@@ -128,8 +128,23 @@ class CategorySerializer(serializers.ModelSerializer):
 
 # ============ RULE SERIALIZERS ============
 
+class OwnCategoryField(serializers.PrimaryKeyRelatedField):
+    """Category reference limited to the requesting user's own categories."""
+    default_error_messages = {
+        'does_not_exist': 'Category not found.',
+        'incorrect_type': 'Category id must be an integer.',
+    }
+
+    def get_queryset(self):
+        request = self.context.get('request')
+        if request is None or not request.user.is_authenticated:
+            return Category.objects.none()
+        return Category.objects.filter(user=request.user)
+
+
 class RuleSerializer(serializers.ModelSerializer):
-    category_id = serializers.IntegerField(write_only=True)
+    # Unknown ids and other users' ids give the same 400, on create and on update
+    category_id = OwnCategoryField(source='category', write_only=True)
     category_name = serializers.CharField(source='category.name', read_only=True)
 
     class Meta:
@@ -139,12 +154,6 @@ class RuleSerializer(serializers.ModelSerializer):
             'priority', 'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
-
-    def create(self, validated_data):
-        category_id = validated_data.pop('category_id')
-        category = Category.objects.get(id=category_id)
-        validated_data['category'] = category
-        return super().create(validated_data)
 
 
 # ============ TRANSACTION SERIALIZERS ============
