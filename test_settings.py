@@ -3,7 +3,14 @@ Test settings for Finance Platform API
 Override production settings for testing with SQLite
 """
 
-from settings import *
+import os
+
+# Obviously fake values, for tests only. assigned (not setdefault) so a developer's real environment is never used by tests.
+os.environ['SECRET_KEY'] = 'test-only-secret-key-not-for-real-use-0001'
+os.environ['JWT_SECRET'] = 'test-only-jwt-secret-not-for-real-use-0002'
+os.environ['ENCRYPTION_KEY'] = 'test-only-encryption-key-not-real-0003'
+
+from settings import *  # noqa: E402,F401,F403
 
 # Use SQLite for tests (no external database needed)
 DATABASES = {

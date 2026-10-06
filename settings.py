@@ -19,7 +19,18 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 # Security
-SECRET_KEY = config('SECRET_KEY', default='dev-key-change-in-production')
+# Secrets have no defaults: the app refuses to start if any is missing or empty.
+from django.core.exceptions import ImproperlyConfigured
+
+
+def _required_secret(name):
+    value = config(name)  # raises decouple.UndefinedValueError when unset
+    if not value or not value.strip():
+        raise ImproperlyConfigured(f'{name} must not be empty.')
+    return value
+
+
+SECRET_KEY = _required_secret('SECRET_KEY')
 DEBUG = config('DEBUG', default=True, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,.railway.app,finance-health-production-f96f.up.railway.app', cast=Csv())
 # Railway injects the service's public domain; always allow it
@@ -177,7 +188,10 @@ CORS_ALLOWED_ORIGINS = config(
 CORS_ALLOW_CREDENTIALS = True
 
 # ============ JWT Configuration ============
-JWT_SECRET = config('JWT_SECRET', default=SECRET_KEY)
+JWT_SECRET = _required_secret('JWT_SECRET')  # must differ from SECRET_KEY
+if JWT_SECRET == SECRET_KEY:
+    import warnings
+    warnings.warn('JWT_SECRET is identical to SECRET_KEY; set a separate value.', stacklevel=2)
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRY = timedelta(minutes=int(config('JWT_EXPIRY_MINUTES', default='15')))
 REFRESH_TOKEN_EXPIRY = timedelta(days=int(config('REFRESH_TOKEN_DAYS', default='7')))
@@ -194,7 +208,9 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
 SECURE_HSTS_PRELOAD = not DEBUG
 
 # ============ Encryption (AES-256-GCM) ============
-ENCRYPTION_KEY = config('ENCRYPTION_KEY', default='dev-encryption-key-change-in-production')
+ENCRYPTION_KEY = _required_secret('ENCRYPTION_KEY')
+if len(ENCRYPTION_KEY) < 32:
+    raise ImproperlyConfigured('ENCRYPTION_KEY must be at least 32 characters.')
 
 # ============ Logging ============
 LOGGING = {
