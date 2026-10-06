@@ -1,6 +1,13 @@
 [build]
 builder = "nixpacks"
+# Runs after dependencies are installed, with service variables available.
+# Static files must be built here so they ship inside the runtime image.
+buildCommand = "python manage.py collectstatic --noinput"
 
 [deploy]
-startCommand = "python manage.py collectstatic --noinput --clear && python manage.py migrate && gunicorn wsgi --bind 0.0.0.0:8000 --log-file -"
+# Runs in a separate container before the new version starts. A failure stops
+# the deploy and leaves the previous version running. Database work only; files
+# written here are not kept.
+preDeployCommand = ["python manage.py migrate --noinput"]
+startCommand = "gunicorn wsgi --bind 0.0.0.0:8000 --log-file -"
 restartPolicyMaxRetries = 5
