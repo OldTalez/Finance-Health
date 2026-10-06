@@ -173,8 +173,9 @@ class Account(models.Model):
     account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPE_CHOICES)
 
     # Account number encrypted at rest (AES-256-GCM)
-    account_number_encrypted = models.CharField(max_length=255, blank=True)
-    account_holder_name_encrypted = models.CharField(max_length=255, blank=True)
+    # TextField: AES-GCM output is longer than the plaintext (nonce, tag, base64)
+    account_number_encrypted = models.TextField(blank=True)
+    account_holder_name_encrypted = models.TextField(blank=True)
 
     currency = models.CharField(max_length=3, default='CAD')
 
@@ -209,6 +210,23 @@ class Account(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.name}"
+
+    # Always go through these helpers; never assign plaintext to the *_encrypted columns.
+    def set_account_number(self, value):
+        from .utils import EncryptionUtils
+        self.account_number_encrypted = EncryptionUtils.encrypt(value, context='accounts.account_number')
+
+    def get_account_number(self):
+        from .utils import EncryptionUtils
+        return EncryptionUtils.decrypt(self.account_number_encrypted, context='accounts.account_number')
+
+    def set_account_holder_name(self, value):
+        from .utils import EncryptionUtils
+        self.account_holder_name_encrypted = EncryptionUtils.encrypt(value, context='accounts.account_holder_name')
+
+    def get_account_holder_name(self):
+        from .utils import EncryptionUtils
+        return EncryptionUtils.decrypt(self.account_holder_name_encrypted, context='accounts.account_holder_name')
 
 
 class Statement(models.Model):

@@ -169,20 +169,71 @@ class JWTAuthentication(TokenAuthentication):
 # ============ ENCRYPTION UTILITIES ============
 
 class EncryptionUtils:
-    """AES-256-GCM encryption for sensitive fields"""
+    """
+    AES-256-GCM encryption for sensitive fields.
+
+    Stored format: "v1:" + urlsafe-base64(nonce[12] || ciphertext || tag[16]).
+    A fresh random 96-bit nonce is used for every value. The 256-bit AES key is
+    derived with HKDF-SHA256 from settings.ENCRYPTION_KEY, so any secret of
+    32+ characters works. `context` is authenticated as associated data: a
+    value encrypted for one field will not decrypt as another.
+
+    Key rotation is not supported yet; the "v1:" prefix leaves room for it.
+    """
+
+    PREFIX = 'v1:'
+    NONCE_BYTES = 12
+    _HKDF_INFO = b'finance-health/field-encryption/v1'
+
+    @classmethod
+    def _aesgcm(cls):
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        key = HKDF(
+            algorithm=hashes.SHA256(), length=32, salt=None, info=cls._HKDF_INFO,
+        ).derive(settings.ENCRYPTION_KEY.encode('utf-8'))
+        return AESGCM(key)
 
     @staticmethod
-    def encrypt(plaintext, user_key=None):
-        """Encrypt plaintext using AES-256-GCM"""
-        # Note: Full implementation would use cryptography.Fernet or similar
-        # For now, return as-is (TODO: implement proper encryption)
-        return plaintext
+    def _aad(context):
+        return context.encode('utf-8') if context else None
 
-    @staticmethod
-    def decrypt(ciphertext, user_key=None):
-        """Decrypt ciphertext using AES-256-GCM"""
-        # Note: Full implementation would use cryptography.Fernet or similar
-        return ciphertext
+    @classmethod
+    def encrypt(cls, plaintext, context=None):
+        """Encrypt a string. Empty string stays empty. Returns the "v1:..." token."""
+        import base64
+        import os
+
+        if plaintext is None or plaintext == '':
+            return ''
+        nonce = os.urandom(cls.NONCE_BYTES)
+        sealed = cls._aesgcm().encrypt(nonce, plaintext.encode('utf-8'), cls._aad(context))
+        return cls.PREFIX + base64.urlsafe_b64encode(nonce + sealed).decode('ascii')
+
+    @classmethod
+    def decrypt(cls, token, context=None):
+        """
+        Decrypt a "v1:..." token. Raises ValueError if the token is malformed,
+        was tampered with, was made with another key or for another context.
+        Never returns unrecognised input as if it were plaintext.
+        """
+        import base64
+        from cryptography.exceptions import InvalidTag
+
+        if token is None or token == '':
+            return ''
+        if not isinstance(token, str) or not token.startswith(cls.PREFIX):
+            raise ValueError('Not an encrypted value')
+        try:
+            raw = base64.urlsafe_b64decode(token[len(cls.PREFIX):].encode('ascii'))
+            nonce, sealed = raw[:cls.NONCE_BYTES], raw[cls.NONCE_BYTES:]
+            if len(nonce) != cls.NONCE_BYTES or len(sealed) < 16:
+                raise ValueError('Malformed encrypted value')
+            return cls._aesgcm().decrypt(nonce, sealed, cls._aad(context)).decode('utf-8')
+        except (InvalidTag, ValueError, UnicodeError) as exc:
+            raise ValueError('Decryption failed') from exc
 
 
 # ============ LOGIN LOCKOUT ============
