@@ -41,6 +41,9 @@ PASSWORD_HASHERS = [
 # Disable CSRF for API tests
 CSRF_TRUSTED_ORIGINS = ['*']
 
-# Test-specific settings
+# Test-specific settings (the test client speaks plain HTTP)
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
 DEBUG = True
 ALLOWED_HOSTS = ['*']

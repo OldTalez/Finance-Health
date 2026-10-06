@@ -31,7 +31,8 @@ def _required_secret(name):
 
 
 SECRET_KEY = _required_secret('SECRET_KEY')
-DEBUG = config('DEBUG', default=True, cast=bool)
+# Safe by default: anything unset in production means DEBUG off. Local dev opts in via .env.
+DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,.railway.app,finance-health-production-f96f.up.railway.app', cast=Csv())
 # Railway injects the service's public domain; always allow it
 _railway_domain = config('RAILWAY_PUBLIC_DOMAIN', default='')
@@ -210,11 +211,12 @@ REFRESH_TOKEN_EXPIRY = timedelta(days=int(config('REFRESH_TOKEN_DAYS', default='
 
 # ============ Security Settings ============
 # Railway terminates TLS at its proxy and forwards plain HTTP to gunicorn; trust its header
-# so Django knows the original request was HTTPS (otherwise SSL redirect loops forever)
+# so Django knows the original request was HTTPS (otherwise SSL redirect loops forever).
+# The three flags below default to True; set them to false in a local .env only.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
-SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=False, cast=bool)
-CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=False, cast=bool)
+SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=True, cast=bool)
+SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=True, cast=bool)
+CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=True, cast=bool)
 SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
 SECURE_HSTS_PRELOAD = not DEBUG

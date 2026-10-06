@@ -61,3 +61,27 @@ class TestSecretsRequired:
         source = (REPO / 'settings.py').read_text()
         assert 'dev-key-change-in-production' not in source
         assert 'dev-encryption-key-change-in-production' not in source
+
+
+class TestProductionSafeDefaults:
+    """With only the three secrets set, everything else must come up in its safe state."""
+
+    CODE = (
+        'import settings as s; '
+        'print(s.DEBUG, s.SECURE_SSL_REDIRECT, s.SESSION_COOKIE_SECURE, '
+        's.CSRF_COOKIE_SECURE, s.SECURE_HSTS_SECONDS > 0, s.REST_FRAMEWORK["NUM_PROXIES"])'
+    )
+
+    def test_defaults_when_unset(self):
+        result = run_settings(code=self.CODE)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.split() == ['False', 'True', 'True', 'True', 'True', '1']
+
+    def test_local_dev_can_override_by_env(self):
+        result = run_settings(
+            extra_env={'DEBUG': 'True', 'SECURE_SSL_REDIRECT': 'False',
+                       'SESSION_COOKIE_SECURE': 'False', 'CSRF_COOKIE_SECURE': 'False',
+                       'NUM_PROXIES': '2'},
+            code=self.CODE,
+        )
+        assert result.stdout.split() == ['True', 'False', 'False', 'False', 'False', '2']
