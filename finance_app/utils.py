@@ -4,6 +4,7 @@ Utility modules: JWT, encryption, audit logging, validators
 
 import jwt
 import logging
+import uuid
 from datetime import timedelta
 from django.utils import timezone
 from django.conf import settings
@@ -24,8 +25,10 @@ class JWTUtils:
     REFRESH_EXPIRY = settings.REFRESH_TOKEN_EXPIRY
 
     @classmethod
-    def generate_tokens(cls, user):
-        """Generate access and refresh tokens"""
+    def generate_tokens(cls, user, family_id=None):
+        """Generate access and refresh tokens. Only a hash of the refresh token is stored."""
+        from .models import RefreshToken
+
         now = timezone.now()
 
         # Access token (15-min expiry)
@@ -38,20 +41,20 @@ class JWTUtils:
         }
         access_token = jwt.encode(access_payload, cls.SECRET, algorithm=cls.ALGORITHM)
 
-        # Refresh token (7-day expiry)
+        # Refresh token (7-day expiry); jti makes every token unique
         refresh_payload = {
             'user_id': user.id,
             'type': 'refresh',
+            'jti': uuid.uuid4().hex,
             'iat': int(now.timestamp()),
             'exp': int((now + cls.REFRESH_EXPIRY).timestamp())
         }
         refresh_token = jwt.encode(refresh_payload, cls.SECRET, algorithm=cls.ALGORITHM)
 
-        # Store refresh token in DB for revocation
-        from .models import RefreshToken
         RefreshToken.objects.create(
             user=user,
-            token=refresh_token,
+            token_hash=RefreshToken.hash_token(refresh_token),
+            family_id=family_id or uuid.uuid4(),
             expires_at=now + cls.REFRESH_EXPIRY
         )
 
@@ -72,8 +75,8 @@ class JWTUtils:
             return payload
         except jwt.ExpiredSignatureError:
             raise AuthenticationFailed('Token expired')
-        except jwt.InvalidTokenError as e:
-            raise AuthenticationFailed(f'Invalid token: {str(e)}')
+        except jwt.InvalidTokenError:
+            raise AuthenticationFailed('Invalid token')
 
     @classmethod
     def get_user_from_token(cls, token):
@@ -83,6 +86,57 @@ class JWTUtils:
             return payload['user_id']
         except Exception:
             return None
+
+    @classmethod
+    def rotate_refresh_token(cls, raw_token):
+        """
+        Exchange a refresh token for a new pair.
+
+        Returns (access, refresh, expires_in) or None when the token is unknown,
+        expired, revoked or its user is inactive. Reuse of a revoked token
+        revokes the entire family.
+        """
+        from .models import RefreshToken
+
+        if not isinstance(raw_token, str):
+            return None
+        try:
+            cls.verify_token(raw_token, is_refresh=True)
+        except AuthenticationFailed:
+            return None
+
+        token_hash = RefreshToken.hash_token(raw_token)
+        record = RefreshToken.objects.select_related('user').filter(token_hash=token_hash).first()
+        if record is None:
+            return None
+
+        now = timezone.now()
+        if record.is_revoked:
+            # Reuse of a rotated or logged-out token: assume theft, kill the family
+            RefreshToken.objects.filter(family_id=record.family_id).update(is_revoked=True)
+            logger.warning('Refresh token reuse detected; family revoked (user_id=%s)', record.user_id)
+            return None
+        if record.expires_at <= now or not record.user.is_active:
+            return None
+
+        # Atomic claim: only one concurrent request can flip is_revoked
+        claimed = RefreshToken.objects.filter(pk=record.pk, is_revoked=False).update(is_revoked=True)
+        if claimed != 1:
+            RefreshToken.objects.filter(family_id=record.family_id).update(is_revoked=True)
+            return None
+
+        return cls.generate_tokens(record.user, family_id=record.family_id)
+
+    @classmethod
+    def revoke_refresh_token(cls, raw_token):
+        """Revoke the family of this refresh token (logout). Returns True if found."""
+        from .models import RefreshToken
+
+        record = RefreshToken.objects.filter(token_hash=RefreshToken.hash_token(raw_token)).first()
+        if record is None:
+            return False
+        RefreshToken.objects.filter(family_id=record.family_id).update(is_revoked=True)
+        return True
 
 
 class JWTAuthentication(TokenAuthentication):
@@ -103,11 +157,13 @@ class JWTAuthentication(TokenAuthentication):
 
             from .models import User
             user = User.objects.get(id=payload['user_id'])
+            if not user.is_active:
+                raise AuthenticationFailed('User inactive')
             return (user, None)
         except AuthenticationFailed:
             raise
         except Exception as e:
-            raise AuthenticationFailed(f'Invalid authentication: {str(e)}')
+            raise AuthenticationFailed('Invalid authentication')
 
 
 # ============ ENCRYPTION UTILITIES ============

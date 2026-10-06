@@ -88,28 +88,35 @@ class RefreshTokenView(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            payload = JWTUtils.verify_token(refresh_token, is_refresh=True)
-            user_id = payload.get('user_id')
-            user = User.objects.get(id=user_id)
-
-            # Generate new tokens
-            access_token, new_refresh_token, expires_in = JWTUtils.generate_tokens(user)
-
-            # Rotate refresh token (invalidate old one)
-            RefreshToken.objects.filter(token=refresh_token).update(is_revoked=True)
-
-            return Response({
-                'access_token': access_token,
-                'refresh_token': new_refresh_token,
-                'expires_in': expires_in
-            }, status=status.HTTP_200_OK)
-        except Exception as e:
-            logger.warning(f"Token refresh failed: {e}")
+        tokens = JWTUtils.rotate_refresh_token(refresh_token)
+        if tokens is None:
             return Response(
                 {'detail': 'Invalid or expired refresh token'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+
+        access_token, new_refresh_token, expires_in = tokens
+        return Response({
+            'access_token': access_token,
+            'refresh_token': new_refresh_token,
+            'expires_in': expires_in
+        }, status=status.HTTP_200_OK)
+
+
+class LogoutView(views.APIView):
+    """Revoke a refresh token (and its rotation family)"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        refresh_token = request.data.get('refresh_token')
+        if not refresh_token or not isinstance(refresh_token, str):
+            return Response(
+                {'detail': 'Refresh token required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Same answer whether or not the token was known: nothing to probe
+        JWTUtils.revoke_refresh_token(refresh_token)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class UserProfileView(views.APIView):

@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.core.validators import EmailValidator, MinLengthValidator
 import hashlib
 import json
+import uuid
 
 # ===================== AUTH =====================
 class CustomUserManager(UserManager):
@@ -61,9 +62,16 @@ class User(AbstractUser):
 
 
 class RefreshToken(models.Model):
-    """Refresh tokens for JWT auth (for revocation/rotation)"""
+    """
+    Refresh tokens for JWT auth (revocation and rotation).
+
+    Only the SHA-256 hash of the token is stored, never the token itself.
+    Every login starts a new family; rotation keeps the family. Presenting an
+    already-revoked token is treated as theft and revokes the whole family.
+    """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='refresh_tokens')
-    token = models.CharField(max_length=500)  # hashed token
+    token_hash = models.CharField(max_length=64, unique=True)  # SHA-256 hex digest
+    family_id = models.UUIDField(default=uuid.uuid4, db_index=True)
     expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     is_revoked = models.BooleanField(default=False)
@@ -73,6 +81,10 @@ class RefreshToken(models.Model):
         indexes = [
             models.Index(fields=['user', 'expires_at']),
         ]
+
+    @staticmethod
+    def hash_token(raw_token):
+        return hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
 
 
 # ===================== ACCOUNTS =====================
