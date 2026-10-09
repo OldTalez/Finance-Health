@@ -8,12 +8,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction
 import logging
+import os
 
 from .models import Account, Statement, Transaction, Category, ImportLog, AuditLog
-from .parsers import StatementParser, Deduplicator
+from .parsers import StatementParser, Deduplicator, CSV_BANK_MAP, PDF_BANK_MAP
 from .utils import AuditLogger
 
 logger = logging.getLogger(__name__)
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+KNOWN_BANK_KEYS = set(CSV_BANK_MAP) | set(PDF_BANK_MAP)
 
 # ============ FILE UPLOAD VIEW ============
 
@@ -35,6 +39,7 @@ class UploadView(views.APIView):
         file_obj = request.FILES['file']
         bank_key = request.data.get('bank_key')
         account_id = request.data.get('account_id')
+        import_log = None
 
         # Validate inputs
         if not bank_key:
@@ -43,24 +48,48 @@ class UploadView(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Validate file size (10MB max)
-        if file_obj.size > 10485760:  # 10MB
+        # Declared size is only a quick first check; the bytes read below are what count
+        if file_obj.size > MAX_UPLOAD_BYTES:
             return Response(
                 {'error': 'File too large (max 10MB)'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Validate file type
-        file_name = file_obj.name
+        # Validate file type: the extension, then the content itself
+        file_name = os.path.basename(file_obj.name or '')[:255]
         if not (file_name.lower().endswith('.pdf') or file_name.lower().endswith('.csv')):
             return Response(
                 {'error': 'Only PDF and CSV files are supported'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        if bank_key not in KNOWN_BANK_KEYS:
+            return Response({'error': 'Unknown bank_key'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if account_id not in (None, ''):
+            try:
+                account_id = int(account_id)
+            except (TypeError, ValueError):
+                return Response({'error': 'account_id must be a number'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            account_id = None
+
+        file_bytes = file_obj.read(MAX_UPLOAD_BYTES + 1)
+        if len(file_bytes) > MAX_UPLOAD_BYTES:
+            return Response({'error': 'File too large (max 10MB)'}, status=status.HTTP_400_BAD_REQUEST)
+        if file_name.lower().endswith('.pdf'):
+            if not file_bytes.startswith(b'%PDF-'):
+                return Response({'error': 'File is not a valid PDF'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            if b'\x00' in file_bytes:
+                return Response({'error': 'File is not a valid CSV'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                file_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                return Response({'error': 'CSV must be UTF-8 text'}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             # Parse the file
-            file_bytes = file_obj.read()
             parse_result, metadata = StatementParser.parse(
                 file_bytes,
                 file_name,
@@ -76,6 +105,9 @@ class UploadView(views.APIView):
                 rows_processed=len(parse_result.transactions),
                 import_status='processing'
             )
+
+            if not parse_result.transactions:
+                raise ValueError('No transactions found in the file; nothing was imported')
 
             # Check for duplicates (statement-level)
             statement_hash = metadata['statement_hash']
@@ -122,66 +154,66 @@ class UploadView(views.APIView):
                     }
                 )
 
-            # Create statement record
-            statement = Statement.objects.create(
-                user=request.user,
-                account=account,
-                bank_key=bank_key,
-                account_type=metadata.get('account_type', 'debit'),
-                file_name=file_name,
-                statement_hash=statement_hash,
-                transaction_count=len(parse_result.transactions),
-                reconciled=parse_result.reconciled
-            )
-
-            # Categorize and import transactions
+            # Statement, transactions and their audit rows commit together or not at all, so a
+            # failed import cannot leave a statement behind that blocks re-uploading the file.
             imported_count = 0
             deduped_count = 0
             errors = []
 
             with transaction.atomic():
+                statement = Statement.objects.create(
+                    user=request.user,
+                    account=account,
+                    bank_key=bank_key,
+                    account_type=metadata.get('account_type', 'debit'),
+                    file_name=file_name,
+                    statement_hash=statement_hash,
+                    period_start=min(t.date for t in parse_result.transactions).date(),
+                    period_end=max(t.date for t in parse_result.transactions).date(),
+                    transaction_count=len(parse_result.transactions),
+                    reconciled=parse_result.reconciled
+                )
+
+                # Two identical rows on one statement (same day, text and amount) are two real
+                # transactions, so the hash carries an occurrence number instead of dropping them.
+                seen = {}
                 for parsed_tx in parse_result.transactions:
-                    try:
-                        # Check for transaction-level duplicates
-                        tx_hash = Deduplicator.calculate_transaction_hash(parsed_tx)
-                        if Transaction.objects.filter(
-                            user=request.user,
-                            import_id=tx_hash,
-                            statement=statement
-                        ).exists():
-                            deduped_count += 1
-                            continue
+                    base_hash = Deduplicator.calculate_transaction_hash(parsed_tx)
+                    seen[base_hash] = seen.get(base_hash, 0) + 1
+                    tx_hash = base_hash if seen[base_hash] == 1 else f"{base_hash}-{seen[base_hash]}"
 
-                        # Categorize transaction
-                        category = self.categorize_transaction(request.user, parsed_tx.description)
-
-                        # Create transaction
-                        tx = Transaction.objects.create(
-                            user=request.user,
-                            account=account,
-                            statement=statement,
-                            category=category,
-                            date=parsed_tx.date,
-                            description=parsed_tx.description,
-                            amount=parsed_tx.amount,
-                            source=metadata['file_format'],
-                            import_id=tx_hash
-                        )
-                        imported_count += 1
-
-                        # Log audit
-                        AuditLogger.log(
-                            request.user,
-                            'import_transaction',
-                            'transaction',
-                            tx.id,
-                            {'import_file': file_name}
-                        )
-
-                    except Exception as e:
-                        logger.error(f"Failed to import transaction: {e}")
-                        errors.append(str(e))
+                    if Transaction.objects.filter(
+                        user=request.user,
+                        import_id=tx_hash,
+                        statement=statement
+                    ).exists():
+                        deduped_count += 1
                         continue
+
+                    category = self.categorize_transaction(request.user, parsed_tx.description)
+
+                    # Any failure here aborts the whole import: a half-imported statement
+                    # silently misstates the balance.
+                    tx = Transaction.objects.create(
+                        user=request.user,
+                        account=account,
+                        statement=statement,
+                        category=category,
+                        date=parsed_tx.date,
+                        description=parsed_tx.description,
+                        amount=parsed_tx.amount,
+                        source=metadata['file_format'],
+                        import_id=tx_hash
+                    )
+                    imported_count += 1
+
+                    AuditLogger.log(
+                        request.user,
+                        'import_transaction',
+                        'transaction',
+                        tx.id,
+                        {'import_file': file_name}
+                    )
 
             # Update account's latest balance and statement date
             account.latest_balance = statement.closing_balance or account.latest_balance
@@ -220,14 +252,7 @@ class UploadView(views.APIView):
 
         except ValueError as e:
             # Parser error
-            import_log = ImportLog.objects.create(
-                user=request.user,
-                file_name=file_name,
-                file_size=file_obj.size,
-                bank_key=bank_key,
-                import_status='failed',
-                error_message=str(e)
-            )
+            self._record_failure(request.user, import_log, file_name, file_obj.size, bank_key, str(e))
 
             return Response({
                 'error': str(e),
@@ -237,19 +262,26 @@ class UploadView(views.APIView):
         except Exception as e:
             # Unexpected error
             logger.error(f"Upload failed: {e}")
-            import_log = ImportLog.objects.create(
-                user=request.user,
-                file_name=file_name,
-                file_size=file_obj.size,
-                bank_key=bank_key,
-                import_status='failed',
-                error_message=f'Internal error: {str(e)}'
+            self._record_failure(
+                request.user, import_log, file_name, file_obj.size, bank_key, 'Internal error'
             )
 
             return Response({
                 'error': 'Failed to process file',
                 'file_name': file_name
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @staticmethod
+    def _record_failure(user, import_log, file_name, file_size, bank_key, message):
+        if import_log is not None:
+            import_log.import_status = 'failed'
+            import_log.error_message = message
+            import_log.save()
+        else:
+            ImportLog.objects.create(
+                user=user, file_name=file_name, file_size=file_size,
+                bank_key=bank_key, import_status='failed', error_message=message
+            )
 
     def categorize_transaction(self, user, description):
         """Auto-categorize a transaction based on rules"""

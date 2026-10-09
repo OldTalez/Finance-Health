@@ -155,6 +155,31 @@ class RuleSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    MAX_PATTERN_LENGTH = 200
+
+    def validate(self, data):
+        # Partial updates may omit either field; fall back to the stored rule
+        pattern = data.get('pattern', getattr(self.instance, 'pattern', None))
+        pattern_type = data.get('pattern_type', getattr(self.instance, 'pattern_type', 'regex'))
+        if pattern is not None:
+            if not pattern.strip():
+                raise serializers.ValidationError({'pattern': 'Pattern cannot be empty.'})
+            if pattern_type == 'regex':
+                if len(pattern) > self.MAX_PATTERN_LENGTH:
+                    raise serializers.ValidationError(
+                        {'pattern': f'Regex patterns are limited to {self.MAX_PATTERN_LENGTH} characters.'}
+                    )
+                try:
+                    re.compile(pattern)
+                except re.error:
+                    raise serializers.ValidationError({'pattern': 'Not a valid regular expression.'})
+                # Nested quantifiers such as (a+)+ can hang the matcher on a long description
+                if re.search(r'\([^)]*[+*][^)]*\)[+*{]', pattern):
+                    raise serializers.ValidationError(
+                        {'pattern': 'Nested repeats like (a+)+ are not allowed; use a simpler pattern.'}
+                    )
+        return data
+
 
 # ============ TRANSACTION SERIALIZERS ============
 
