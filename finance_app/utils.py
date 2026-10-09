@@ -6,6 +6,7 @@ import jwt
 import logging
 import uuid
 from datetime import timedelta
+from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from rest_framework.authentication import TokenAuthentication
@@ -303,15 +304,18 @@ class AuditLogger:
                     ip_address = request.META.get('REMOTE_ADDR')
                 user_agent = request.META.get('HTTP_USER_AGENT')
 
-            AuditLog.objects.create(
-                user=user,
-                action=action,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                details=details or {},
-                ip_address=ip_address,
-                user_agent=user_agent
-            )
+            # Savepoint: a failed audit insert must not abort the request's transaction
+            # (ATOMIC_REQUESTS), or Postgres silently rolls back the whole request.
+            with transaction.atomic():
+                AuditLog.objects.create(
+                    user=user,
+                    action=action,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    details=details or {},
+                    ip_address=ip_address,
+                    user_agent=user_agent
+                )
         except Exception as e:
             logger.error(f"Audit logging failed: {e}")
 
