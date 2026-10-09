@@ -59,7 +59,7 @@ Tests run on SQLite with `--nomigrations` and use their own fake keys (`test_set
 
 ## Deploying (Railway)
 
-Railway builds with nixpacks and is configured by `railway.toml`: `collectstatic` runs at build, `migrate` runs as a pre-deploy step (if it fails, the deploy stops and the old version keeps running), then gunicorn starts. `railway.toml` is what Railway follows; the `Procfile` is left over and is not what drives deploys here. Environment variables are set in the Railway dashboard, never in the repo. Click-by-click steps are in [DEPLOYMENT.md](DEPLOYMENT.md).
+Railway builds with nixpacks and is configured by `railway.toml`: `collectstatic` runs at build, `migrate` runs at start, just before gunicorn (a pre-deploy step was tried on staging and did not apply the migrations). `railway.toml` is what Railway follows; the `Procfile` is left over and is not what drives deploys here. Environment variables are set in the Railway dashboard, never in the repo. Click-by-click steps are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 Production variables to check in Railway: `SECRET_KEY`, `JWT_SECRET` and `ENCRYPTION_KEY` (all set, all different), `DEBUG=False`, `NUM_PROXIES=1`, the three secure flags `True`, and `ALLOWED_HOSTS` / `CORS_ALLOWED_ORIGINS` limited to your own domains. Never use "Add Public Access" on the PostgreSQL service. Losing `ENCRYPTION_KEY` makes encrypted account numbers unreadable, so keep a copy somewhere private.
 
