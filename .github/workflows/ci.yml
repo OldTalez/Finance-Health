@@ -38,7 +38,9 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgres://postgres:ci@localhost:5432/finance_ci
-      SECRET_KEY: ci-only-not-a-secret
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-0123456789
+      JWT_SECRET: ci-only-jwt-secret-not-used-anywhere-0123456789
+      ENCRYPTION_KEY: ci-only-encryption-key-not-used-anywhere-0123
       DEBUG: "false"
     steps:
       - uses: actions/checkout@v4
