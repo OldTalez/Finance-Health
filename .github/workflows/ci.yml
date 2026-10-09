@@ -50,9 +50,8 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python manage.py migrate --noinput
-      - name: Pending model changes without a migration (report only)
+      - name: Model changes must have a migration
         run: python manage.py makemigrations --check --dry-run
-        continue-on-error: true
       - name: Deploy settings check (report only)
         run: python manage.py check --deploy
         continue-on-error: true
