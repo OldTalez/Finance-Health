@@ -4,7 +4,9 @@ Utility modules: JWT, encryption, audit logging, validators
 
 import jwt
 import logging
+import uuid
 from datetime import timedelta
+from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from rest_framework.authentication import TokenAuthentication
@@ -24,8 +26,10 @@ class JWTUtils:
     REFRESH_EXPIRY = settings.REFRESH_TOKEN_EXPIRY
 
     @classmethod
-    def generate_tokens(cls, user):
-        """Generate access and refresh tokens"""
+    def generate_tokens(cls, user, family_id=None):
+        """Generate access and refresh tokens. Only a hash of the refresh token is stored."""
+        from .models import RefreshToken
+
         now = timezone.now()
 
         # Access token (15-min expiry)
@@ -38,20 +42,20 @@ class JWTUtils:
         }
         access_token = jwt.encode(access_payload, cls.SECRET, algorithm=cls.ALGORITHM)
 
-        # Refresh token (7-day expiry)
+        # Refresh token (7-day expiry); jti makes every token unique
         refresh_payload = {
             'user_id': user.id,
             'type': 'refresh',
+            'jti': uuid.uuid4().hex,
             'iat': int(now.timestamp()),
             'exp': int((now + cls.REFRESH_EXPIRY).timestamp())
         }
         refresh_token = jwt.encode(refresh_payload, cls.SECRET, algorithm=cls.ALGORITHM)
 
-        # Store refresh token in DB for revocation
-        from .models import RefreshToken
         RefreshToken.objects.create(
             user=user,
-            token=refresh_token,
+            token_hash=RefreshToken.hash_token(refresh_token),
+            family_id=family_id or uuid.uuid4(),
             expires_at=now + cls.REFRESH_EXPIRY
         )
 
@@ -72,8 +76,8 @@ class JWTUtils:
             return payload
         except jwt.ExpiredSignatureError:
             raise AuthenticationFailed('Token expired')
-        except jwt.InvalidTokenError as e:
-            raise AuthenticationFailed(f'Invalid token: {str(e)}')
+        except jwt.InvalidTokenError:
+            raise AuthenticationFailed('Invalid token')
 
     @classmethod
     def get_user_from_token(cls, token):
@@ -83,6 +87,57 @@ class JWTUtils:
             return payload['user_id']
         except Exception:
             return None
+
+    @classmethod
+    def rotate_refresh_token(cls, raw_token):
+        """
+        Exchange a refresh token for a new pair.
+
+        Returns (access, refresh, expires_in) or None when the token is unknown,
+        expired, revoked or its user is inactive. Reuse of a revoked token
+        revokes the entire family.
+        """
+        from .models import RefreshToken
+
+        if not isinstance(raw_token, str):
+            return None
+        try:
+            cls.verify_token(raw_token, is_refresh=True)
+        except AuthenticationFailed:
+            return None
+
+        token_hash = RefreshToken.hash_token(raw_token)
+        record = RefreshToken.objects.select_related('user').filter(token_hash=token_hash).first()
+        if record is None:
+            return None
+
+        now = timezone.now()
+        if record.is_revoked:
+            # Reuse of a rotated or logged-out token: assume theft, kill the family
+            RefreshToken.objects.filter(family_id=record.family_id).update(is_revoked=True)
+            logger.warning('Refresh token reuse detected; family revoked (user_id=%s)', record.user_id)
+            return None
+        if record.expires_at <= now or not record.user.is_active:
+            return None
+
+        # Atomic claim: only one concurrent request can flip is_revoked
+        claimed = RefreshToken.objects.filter(pk=record.pk, is_revoked=False).update(is_revoked=True)
+        if claimed != 1:
+            RefreshToken.objects.filter(family_id=record.family_id).update(is_revoked=True)
+            return None
+
+        return cls.generate_tokens(record.user, family_id=record.family_id)
+
+    @classmethod
+    def revoke_refresh_token(cls, raw_token):
+        """Revoke the family of this refresh token (logout). Returns True if found."""
+        from .models import RefreshToken
+
+        record = RefreshToken.objects.filter(token_hash=RefreshToken.hash_token(raw_token)).first()
+        if record is None:
+            return False
+        RefreshToken.objects.filter(family_id=record.family_id).update(is_revoked=True)
+        return True
 
 
 class JWTAuthentication(TokenAuthentication):
@@ -103,30 +158,128 @@ class JWTAuthentication(TokenAuthentication):
 
             from .models import User
             user = User.objects.get(id=payload['user_id'])
+            if not user.is_active:
+                raise AuthenticationFailed('User inactive')
             return (user, None)
         except AuthenticationFailed:
             raise
         except Exception as e:
-            raise AuthenticationFailed(f'Invalid authentication: {str(e)}')
+            raise AuthenticationFailed('Invalid authentication')
 
 
 # ============ ENCRYPTION UTILITIES ============
 
 class EncryptionUtils:
-    """AES-256-GCM encryption for sensitive fields"""
+    """
+    AES-256-GCM encryption for sensitive fields.
+
+    Stored format: "v1:" + urlsafe-base64(nonce[12] || ciphertext || tag[16]).
+    A fresh random 96-bit nonce is used for every value. The 256-bit AES key is
+    derived with HKDF-SHA256 from settings.ENCRYPTION_KEY, so any secret of
+    32+ characters works. `context` is authenticated as associated data: a
+    value encrypted for one field will not decrypt as another.
+
+    Key rotation is not supported yet; the "v1:" prefix leaves room for it.
+    """
+
+    PREFIX = 'v1:'
+    NONCE_BYTES = 12
+    _HKDF_INFO = b'finance-health/field-encryption/v1'
+
+    @classmethod
+    def _aesgcm(cls):
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        key = HKDF(
+            algorithm=hashes.SHA256(), length=32, salt=None, info=cls._HKDF_INFO,
+        ).derive(settings.ENCRYPTION_KEY.encode('utf-8'))
+        return AESGCM(key)
 
     @staticmethod
-    def encrypt(plaintext, user_key=None):
-        """Encrypt plaintext using AES-256-GCM"""
-        # Note: Full implementation would use cryptography.Fernet or similar
-        # For now, return as-is (TODO: implement proper encryption)
-        return plaintext
+    def _aad(context):
+        return context.encode('utf-8') if context else None
+
+    @classmethod
+    def encrypt(cls, plaintext, context=None):
+        """Encrypt a string. Empty string stays empty. Returns the "v1:..." token."""
+        import base64
+        import os
+
+        if plaintext is None or plaintext == '':
+            return ''
+        nonce = os.urandom(cls.NONCE_BYTES)
+        sealed = cls._aesgcm().encrypt(nonce, plaintext.encode('utf-8'), cls._aad(context))
+        return cls.PREFIX + base64.urlsafe_b64encode(nonce + sealed).decode('ascii')
+
+    @classmethod
+    def decrypt(cls, token, context=None):
+        """
+        Decrypt a "v1:..." token. Raises ValueError if the token is malformed,
+        was tampered with, was made with another key or for another context.
+        Never returns unrecognised input as if it were plaintext.
+        """
+        import base64
+        from cryptography.exceptions import InvalidTag
+
+        if token is None or token == '':
+            return ''
+        if not isinstance(token, str) or not token.startswith(cls.PREFIX):
+            raise ValueError('Not an encrypted value')
+        try:
+            raw = base64.urlsafe_b64decode(token[len(cls.PREFIX):].encode('ascii'))
+            nonce, sealed = raw[:cls.NONCE_BYTES], raw[cls.NONCE_BYTES:]
+            if len(nonce) != cls.NONCE_BYTES or len(sealed) < 16:
+                raise ValueError('Malformed encrypted value')
+            return cls._aesgcm().decrypt(nonce, sealed, cls._aad(context)).decode('utf-8')
+        except (InvalidTag, ValueError, UnicodeError) as exc:
+            raise ValueError('Decryption failed') from exc
+
+
+# ============ LOGIN LOCKOUT ============
+
+class LoginLockout:
+    """
+    Per-account lockout: after LOGIN_LOCKOUT_ATTEMPTS failures inside
+    LOGIN_LOCKOUT_MINUTES the account refuses logins until the oldest counted
+    failure ages out. Failures are recorded for unknown emails too, so the
+    response never reveals whether an account exists.
+    """
 
     @staticmethod
-    def decrypt(ciphertext, user_key=None):
-        """Decrypt ciphertext using AES-256-GCM"""
-        # Note: Full implementation would use cryptography.Fernet or similar
-        return ciphertext
+    def _key(email):
+        return str(email or '').strip().lower()[:254]
+
+    @classmethod
+    def _window_start(cls):
+        return timezone.now() - timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
+
+    @classmethod
+    def is_locked(cls, email):
+        from .models import LoginFailure
+        key = cls._key(email)
+        if not key:
+            return False
+        recent = LoginFailure.objects.filter(email=key, created_at__gte=cls._window_start()).count()
+        return recent >= settings.LOGIN_LOCKOUT_ATTEMPTS
+
+    @classmethod
+    def record_failure(cls, email):
+        from .models import LoginFailure
+        key = cls._key(email)
+        if not key:
+            return
+        LoginFailure.objects.create(email=key)
+        # Housekeeping: drop rows that no longer count toward any lockout
+        LoginFailure.objects.filter(created_at__lt=cls._window_start()).delete()
+
+    @classmethod
+    def clear(cls, email):
+        from .models import LoginFailure
+        key = cls._key(email)
+        if key:
+            LoginFailure.objects.filter(email=key).delete()
 
 
 # ============ AUDIT LOGGING ============
@@ -151,15 +304,18 @@ class AuditLogger:
                     ip_address = request.META.get('REMOTE_ADDR')
                 user_agent = request.META.get('HTTP_USER_AGENT')
 
-            AuditLog.objects.create(
-                user=user,
-                action=action,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                details=details or {},
-                ip_address=ip_address,
-                user_agent=user_agent
-            )
+            # Savepoint: a failed audit insert must not abort the request's transaction
+            # (ATOMIC_REQUESTS), or Postgres silently rolls back the whole request.
+            with transaction.atomic():
+                AuditLog.objects.create(
+                    user=user,
+                    action=action,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    details=details or {},
+                    ip_address=ip_address,
+                    user_agent=user_agent
+                )
         except Exception as e:
             logger.error(f"Audit logging failed: {e}")
 

@@ -9,6 +9,9 @@ from django.utils import timezone
 from django.core.validators import EmailValidator, MinLengthValidator
 import hashlib
 import json
+import secrets
+import uuid
+from datetime import timedelta
 
 # ===================== AUTH =====================
 class CustomUserManager(UserManager):
@@ -61,9 +64,16 @@ class User(AbstractUser):
 
 
 class RefreshToken(models.Model):
-    """Refresh tokens for JWT auth (for revocation/rotation)"""
+    """
+    Refresh tokens for JWT auth (revocation and rotation).
+
+    Only the SHA-256 hash of the token is stored, never the token itself.
+    Every login starts a new family; rotation keeps the family. Presenting an
+    already-revoked token is treated as theft and revokes the whole family.
+    """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='refresh_tokens')
-    token = models.CharField(max_length=500)  # hashed token
+    token_hash = models.CharField(max_length=64, unique=True)  # SHA-256 hex digest
+    family_id = models.UUIDField(default=uuid.uuid4, db_index=True)
     expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     is_revoked = models.BooleanField(default=False)
@@ -73,6 +83,79 @@ class RefreshToken(models.Model):
         indexes = [
             models.Index(fields=['user', 'expires_at']),
         ]
+
+    @staticmethod
+    def hash_token(raw_token):
+        return hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+
+
+class LoginFailure(models.Model):
+    """One failed login attempt, keyed by the (lower-cased) email that was tried."""
+    email = models.CharField(max_length=254, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'login_failures'
+
+
+class InviteCode(models.Model):
+    """
+    Single-use registration invite. Sign-up is invite-only (Board ruling).
+
+    Only the SHA-256 hash of the code is stored; the plain code is shown once,
+    when an admin (or the create_invite command) issues it.
+    """
+    code_hash = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=100, blank=True, help_text='Who this invite is for (note to self).')
+    expires_at = models.DateTimeField(null=True, blank=True, help_text='Leave empty for no expiry.')
+    used_at = models.DateTimeField(null=True, blank=True)
+    used_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name='invite_used'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'invite_codes'
+
+    def __str__(self):
+        state = 'used' if self.used_at else 'unused'
+        return f'Invite {self.label or self.pk} ({state})'
+
+    @staticmethod
+    def hash_code(code):
+        return hashlib.sha256(code.strip().encode('utf-8')).hexdigest()
+
+    @classmethod
+    def issue(cls, label='', days=None):
+        """Create an invite. Returns (invite, plain_code); the plain code is not recoverable later."""
+        code = secrets.token_urlsafe(18)
+        expires_at = timezone.now() + timedelta(days=days) if days else None
+        invite = cls.objects.create(code_hash=cls.hash_code(code), label=label, expires_at=expires_at)
+        return invite, code
+
+    @classmethod
+    def _usable(cls, code):
+        if not code or not isinstance(code, str) or len(code) > 200:
+            return cls.objects.none()
+        now = timezone.now()
+        return cls.objects.filter(code_hash=cls.hash_code(code), used_at__isnull=True).filter(
+            models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
+        )
+
+    @classmethod
+    def is_usable(cls, code):
+        return cls._usable(code).exists()
+
+    @classmethod
+    def claim(cls, code):
+        """Atomically mark the code used. Returns the invite, or None if missing, used or expired."""
+        usable = cls._usable(code)
+        pk = usable.values_list('pk', flat=True).first()
+        if pk is None:
+            return None
+        # The filter repeats the usable conditions, so two racing requests cannot both win
+        won = usable.filter(pk=pk).update(used_at=timezone.now())
+        return cls.objects.get(pk=pk) if won == 1 else None
 
 
 # ===================== ACCOUNTS =====================
@@ -90,8 +173,9 @@ class Account(models.Model):
     account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPE_CHOICES)
 
     # Account number encrypted at rest (AES-256-GCM)
-    account_number_encrypted = models.CharField(max_length=255, blank=True)
-    account_holder_name_encrypted = models.CharField(max_length=255, blank=True)
+    # TextField: AES-GCM output is longer than the plaintext (nonce, tag, base64)
+    account_number_encrypted = models.TextField(blank=True)
+    account_holder_name_encrypted = models.TextField(blank=True)
 
     currency = models.CharField(max_length=3, default='CAD')
 
@@ -126,6 +210,23 @@ class Account(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.name}"
+
+    # Always go through these helpers; never assign plaintext to the *_encrypted columns.
+    def set_account_number(self, value):
+        from .utils import EncryptionUtils
+        self.account_number_encrypted = EncryptionUtils.encrypt(value, context='accounts.account_number')
+
+    def get_account_number(self):
+        from .utils import EncryptionUtils
+        return EncryptionUtils.decrypt(self.account_number_encrypted, context='accounts.account_number')
+
+    def set_account_holder_name(self, value):
+        from .utils import EncryptionUtils
+        self.account_holder_name_encrypted = EncryptionUtils.encrypt(value, context='accounts.account_holder_name')
+
+    def get_account_holder_name(self):
+        from .utils import EncryptionUtils
+        return EncryptionUtils.decrypt(self.account_holder_name_encrypted, context='accounts.account_holder_name')
 
 
 class Statement(models.Model):

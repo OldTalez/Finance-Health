@@ -19,8 +19,20 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 # Security
-SECRET_KEY = config('SECRET_KEY', default='dev-key-change-in-production')
-DEBUG = config('DEBUG', default=True, cast=bool)
+# Secrets have no defaults: the app refuses to start if any is missing or empty.
+from django.core.exceptions import ImproperlyConfigured
+
+
+def _required_secret(name):
+    value = config(name)  # raises decouple.UndefinedValueError when unset
+    if not value or not value.strip():
+        raise ImproperlyConfigured(f'{name} must not be empty.')
+    return value
+
+
+SECRET_KEY = _required_secret('SECRET_KEY')
+# Safe by default: anything unset in production means DEBUG off. Local dev opts in via .env.
+DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,.railway.app,finance-health-production-f96f.up.railway.app', cast=Csv())
 # Railway injects the service's public domain; always allow it
 _railway_domain = config('RAILWAY_PUBLIC_DOMAIN', default='')
@@ -164,9 +176,21 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
         'user': '1000/hour',
-        'auth_failed': '5/15m',  # 5 failed logins per 15 minutes
-    }
+        'login': '20/hour',      # per client address, on POST /auth/login/
+        'register': '10/hour',   # per client address, on POST /auth/register/
+        'logout': '60/hour',
+        'refresh': '120/hour',
+    },
+    # Number of reverse proxies in front of the app. Railway adds one. DRF then
+    # takes the client address from the right-hand end of X-Forwarded-For, which
+    # the proxy wrote, instead of trusting the client-controlled left-hand end.
+    'NUM_PROXIES': int(config('NUM_PROXIES', default='1')),
 }
+
+# Per-account lockout after repeated failed logins (stored in the database so it
+# is shared by every worker and survives restarts).
+LOGIN_LOCKOUT_ATTEMPTS = int(config('LOGIN_LOCKOUT_ATTEMPTS', default='5'))
+LOGIN_LOCKOUT_MINUTES = int(config('LOGIN_LOCKOUT_MINUTES', default='15'))
 
 # ============ CORS Configuration ============
 CORS_ALLOWED_ORIGINS = config(
@@ -177,24 +201,30 @@ CORS_ALLOWED_ORIGINS = config(
 CORS_ALLOW_CREDENTIALS = True
 
 # ============ JWT Configuration ============
-JWT_SECRET = config('JWT_SECRET', default=SECRET_KEY)
+JWT_SECRET = _required_secret('JWT_SECRET')  # must differ from SECRET_KEY
+if JWT_SECRET == SECRET_KEY:
+    import warnings
+    warnings.warn('JWT_SECRET is identical to SECRET_KEY; set a separate value.', stacklevel=2)
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRY = timedelta(minutes=int(config('JWT_EXPIRY_MINUTES', default='15')))
 REFRESH_TOKEN_EXPIRY = timedelta(days=int(config('REFRESH_TOKEN_DAYS', default='7')))
 
 # ============ Security Settings ============
 # Railway terminates TLS at its proxy and forwards plain HTTP to gunicorn; trust its header
-# so Django knows the original request was HTTPS (otherwise SSL redirect loops forever)
+# so Django knows the original request was HTTPS (otherwise SSL redirect loops forever).
+# The three flags below default to True; set them to false in a local .env only.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
-SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=False, cast=bool)
-CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=False, cast=bool)
+SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=True, cast=bool)
+SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=True, cast=bool)
+CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=True, cast=bool)
 SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
 SECURE_HSTS_PRELOAD = not DEBUG
 
 # ============ Encryption (AES-256-GCM) ============
-ENCRYPTION_KEY = config('ENCRYPTION_KEY', default='dev-encryption-key-change-in-production')
+ENCRYPTION_KEY = _required_secret('ENCRYPTION_KEY')
+if len(ENCRYPTION_KEY) < 32:
+    raise ImproperlyConfigured('ENCRYPTION_KEY must be at least 32 characters.')
 
 # ============ Logging ============
 LOGGING = {

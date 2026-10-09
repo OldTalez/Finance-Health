@@ -14,7 +14,6 @@ from typing import List, Dict, Tuple, Optional
 import logging
 
 try:
-    import PyPDF2
     from pdf2image import convert_from_bytes
     import pytesseract
 except ImportError:

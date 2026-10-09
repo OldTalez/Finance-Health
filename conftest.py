@@ -12,6 +12,14 @@ from finance_app.models import Account, Category, Rule, Transaction, Statement
 
 User = get_user_model()
 
+@pytest.fixture(autouse=True)
+def clear_throttle_cache():
+    """Throttle counters live in the cache; reset between tests so they never leak."""
+    from django.core.cache import cache
+    cache.clear()
+    yield
+    cache.clear()
+
 # ============ USER & AUTH FIXTURES ============
 
 @pytest.fixture
@@ -46,6 +54,13 @@ def authenticated_client(api_client, user):
     access_token, refresh_token, _ = JWTUtils.generate_tokens(user)
     api_client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
     return api_client
+
+@pytest.fixture
+def invite_code(db):
+    """A fresh single-use registration invite; returns the plain code."""
+    from finance_app.models import InviteCode
+    _, code = InviteCode.issue(label='test invite')
+    return code
 
 # ============ ACCOUNT FIXTURES ============
 

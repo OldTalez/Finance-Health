@@ -7,7 +7,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Q, Sum, Case, When, DecimalField, Count
 from datetime import timedelta, datetime
 from decimal import Decimal
@@ -15,14 +17,14 @@ import logging
 
 from .models import (
     User, Account, Statement, Category, Rule, Transaction,
-    RecurringCharge, ImportLog, AuditLog, RefreshToken
+    RecurringCharge, ImportLog, AuditLog, RefreshToken, InviteCode
 )
 from .serializers import (
     UserSerializer, RegisterSerializer, LoginSerializer, TokenSerializer,
     AccountSerializer, TransactionSerializer, CategorySerializer, RuleSerializer,
     DashboardSerializer, RecurringChargeSerializer, ImportLogSerializer
 )
-from .utils import JWTUtils, AuditLogger
+from .utils import JWTUtils, AuditLogger, LoginLockout
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +33,57 @@ logger = logging.getLogger(__name__)
 class RegisterView(views.APIView):
     """User registration endpoint"""
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'register'
+
+    INVALID_INVITE = {'detail': 'Invalid or expired invite code.'}
 
     def post(self, request):
+        # Invite-only sign-up. One generic answer for missing, used, expired or wrong
+        # codes, so the response says nothing about which case it was.
+        invite_code = request.data.get('invite_code') if hasattr(request.data, 'get') else None
+        if not InviteCode.is_usable(invite_code):
+            return Response(self.INVALID_INVITE, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = RegisterSerializer(data=request.data)
-        if serializer.is_valid():
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            invite = InviteCode.claim(invite_code)
+            if invite is None:  # lost a race for the same code
+                return Response(self.INVALID_INVITE, status=status.HTTP_400_BAD_REQUEST)
             user = serializer.save()
-            # Log audit event
-            AuditLogger.log(user, 'register', 'user', user.id, {'email': user.email})
-            return Response(
-                UserSerializer(user).data,
-                status=status.HTTP_201_CREATED
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            invite.used_by = user
+            invite.save(update_fields=['used_by'])
+
+        # Log audit event
+        AuditLogger.log(user, 'register', 'user', user.id, {'email': user.email})
+        return Response(
+            UserSerializer(user).data,
+            status=status.HTTP_201_CREATED
+        )
 
 
 class LoginView(views.APIView):
-    """User login endpoint — returns JWT tokens"""
+    """User login endpoint - returns JWT tokens"""
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'login'
 
     def post(self, request):
+        raw_email = request.data.get('email') if hasattr(request.data, 'get') else None
+
+        if LoginLockout.is_locked(raw_email):
+            return Response(
+                {'detail': 'Too many failed attempts. Try again later.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
+
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
+            LoginLockout.clear(raw_email)
 
             # Generate JWT tokens
             access_token, refresh_token, expires_in = JWTUtils.generate_tokens(user)
@@ -67,6 +98,7 @@ class LoginView(views.APIView):
                 'token_type': 'Bearer'
             }, status=status.HTTP_200_OK)
 
+        LoginLockout.record_failure(raw_email)
         return Response(serializer.errors, status=status.HTTP_401_UNAUTHORIZED)
 
     def get_client_ip(self):
@@ -79,6 +111,8 @@ class LoginView(views.APIView):
 class RefreshTokenView(views.APIView):
     """Refresh expired access token"""
     permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'refresh'
 
     def post(self, request):
         refresh_token = request.data.get('refresh_token')
@@ -88,28 +122,37 @@ class RefreshTokenView(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            payload = JWTUtils.verify_token(refresh_token, is_refresh=True)
-            user_id = payload.get('user_id')
-            user = User.objects.get(id=user_id)
-
-            # Generate new tokens
-            access_token, new_refresh_token, expires_in = JWTUtils.generate_tokens(user)
-
-            # Rotate refresh token (invalidate old one)
-            RefreshToken.objects.filter(token=refresh_token).update(is_revoked=True)
-
-            return Response({
-                'access_token': access_token,
-                'refresh_token': new_refresh_token,
-                'expires_in': expires_in
-            }, status=status.HTTP_200_OK)
-        except Exception as e:
-            logger.warning(f"Token refresh failed: {e}")
+        tokens = JWTUtils.rotate_refresh_token(refresh_token)
+        if tokens is None:
             return Response(
                 {'detail': 'Invalid or expired refresh token'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+
+        access_token, new_refresh_token, expires_in = tokens
+        return Response({
+            'access_token': access_token,
+            'refresh_token': new_refresh_token,
+            'expires_in': expires_in
+        }, status=status.HTTP_200_OK)
+
+
+class LogoutView(views.APIView):
+    """Revoke a refresh token (and its rotation family)"""
+    permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle, ScopedRateThrottle]
+    throttle_scope = 'logout'
+
+    def post(self, request):
+        refresh_token = request.data.get('refresh_token')
+        if not refresh_token or not isinstance(refresh_token, str):
+            return Response(
+                {'detail': 'Refresh token required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Same answer whether or not the token was known: nothing to probe
+        JWTUtils.revoke_refresh_token(refresh_token)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class UserProfileView(views.APIView):

@@ -1,6 +1,13 @@
 [build]
 builder = "nixpacks"
+# Runs after dependencies are installed, with service variables available.
+# Static files must be built here so they ship inside the runtime image.
+buildCommand = "python manage.py collectstatic --noinput"
 
 [deploy]
-startCommand = "python manage.py collectstatic --noinput --clear && python manage.py migrate && gunicorn wsgi --bind 0.0.0.0:8000 --log-file -"
+# Migrations run at start, before gunicorn, because the separate pre-deploy
+# step did not apply them on staging (2026-10-09). If migrate fails the
+# container exits and Railway keeps restarting it, which is loud and safe.
+# Single replica only: two replicas could race to migrate.
+startCommand = "python manage.py migrate --noinput && gunicorn wsgi --bind 0.0.0.0:8000 --log-file -"
 restartPolicyMaxRetries = 5

@@ -1,257 +1,98 @@
-# Finance Platform Backend — Phase 1
+# Finance Health — Backend
 
-**Status:** Development in progress (Weeks 1–3)  
-**Tech Stack:** Django 4.2 + Django REST Framework + PostgreSQL  
-**Deadline:** 2026-10-24
+Private personal-finance API: budgeting, forecasting and investing tools, built so a small group of invited members can each see only their own data.
 
-## Project Structure
+**Status:** Django backend only. The Next.js frontend is planned but does not exist yet.
+**Stack:** Django 5.2, Django REST Framework, PostgreSQL (Railway), SQLite for tests.
+
+## Branches and deploys
+
+| Branch | Deploys to | Rules |
+|---|---|---|
+| `staging` | Railway staging | Work lands here first (via PR). |
+| `main` | Railway production | Protected. Pull request only, from `staging`. |
+
+CI (`.github/workflows/ci.yml`, on pull requests to `staging` and `main`) runs the tests on SQLite, applies the migrations to a real PostgreSQL 16, and runs `pip-audit` on the dependencies. A known-vulnerable dependency fails the audit check.
+
+## What is in the repo
 
 ```
-finance-platform-api/
-├── manage.py                 # Django CLI entry point
-├── requirements.txt          # Python dependencies
-├── pytest.ini               # Pytest configuration
-├── .env.example             # Environment variables template
-├── src/
-│   ├── __init__.py
-│   ├── settings.py          # Django settings (DB, auth, middleware, installed apps)
-│   ├── urls.py              # Root URL router
-│   ├── wsgi.py              # WSGI app for production
-│   ├── asgi.py              # ASGI app for async/WebSocket (future)
-│   ├── apps/
-│   │   ├── auth/            # User authentication
-│   │   │   ├── models.py    # User model
-│   │   │   ├── views.py     # Login, register, token refresh
-│   │   │   ├── serializers.py
-│   │   │   ├── urls.py
-│   │   │   └── tests.py
-│   │   ├── accounts/        # User's bank accounts
-│   │   │   ├── models.py    # Account, Statement models
-│   │   │   ├── views.py     # Account CRUD, listing
-│   │   │   ├── serializers.py
-│   │   │   ├── urls.py
-│   │   │   └── tests.py
-│   │   ├── transactions/    # Transaction data & queries
-│   │   │   ├── models.py    # Transaction, Category, Rule models
-│   │   │   ├── views.py     # Transaction GET/PATCH/DELETE, filtering
-│   │   │   ├── serializers.py
-│   │   │   ├── urls.py
-│   │   │   └── tests.py
-│   │   ├── import/          # PDF/CSV parsing & import
-│   │   │   ├── parsers.py   # PDF & CSV parsing engines
-│   │   │   ├── views.py     # /api/upload, file processing
-│   │   │   ├── serializers.py
-│   │   │   ├── urls.py
-│   │   │   ├── deduplicator.py  # Statement deduplication logic
-│   │   │   └── tests.py
-│   │   ├── categories/      # Categorization & rules
-│   │   │   ├── models.py    # Category, Rule models (shared with transactions/)
-│   │   │   ├── views.py     # Rules CRUD, category listing
-│   │   │   ├── categorizer.py   # Rule application engine
-│   │   │   ├── urls.py
-│   │   │   └── tests.py
-│   │   ├── analytics/       # Dashboard, metrics, recurring detection
-│   │   │   ├── views.py     # /api/dashboard, /api/analytics
-│   │   │   ├── algorithms.py    # Net worth, money-left-month, outlier detection
-│   │   │   ├── serializers.py
-│   │   │   ├── urls.py
-│   │   │   └── tests.py
-│   │   └── audit/           # Audit logging
-│   │       ├── models.py    # AuditLog model
-│   │       ├── middleware.py    # Request logging middleware
-│   │       └── views.py     # Audit log retrieval (admin only)
-│   ├── middleware.py        # Auth, rate limiting, CORS
-│   ├── utils/
-│   │   ├── crypto.py        # AES-256-GCM encryption for sensitive fields
-│   │   ├── jwt_utils.py     # JWT token generation/validation
-│   │   ├── decorators.py    # @require_auth, @rate_limit
-│   │   └── validators.py    # Email, password validators
-│   └── tests/
-│       ├── conftest.py      # Pytest fixtures
-│       └── test_integration.py  # End-to-end tests
-└── docs/
-    ├── API_SPEC.md          # Swagger/OpenAPI spec (human-readable)
-    ├── SETUP.md             # Installation & local dev setup
-    ├── DEPLOYMENT.md        # Railway/Render deployment guide
-    └── SECURITY.md          # Encryption, auth, PCI-DSS notes
+manage.py, settings.py, urls.py, wsgi.py   Django project (flat layout, no src/ folder)
+finance_app/                               the one app: models, views, serializers,
+                                           parsers.py (PDF/CSV), upload_views.py, utils.py,
+                                           management/commands/create_invite.py
+test_api.py, conftest.py, test_settings.py tests (pytest, SQLite)
+railway.toml                               how Railway builds and starts the app
+schema.sql                                 reference schema (Django migrations are the source of truth)
+.env.example                               environment variable template
 ```
 
-## Quick Start
+Other documents: [API-SPEC.md](API-SPEC.md), [DEPLOYMENT.md](DEPLOYMENT.md), [FINANCIAL-DEFINITIONS.md](FINANCIAL-DEFINITIONS.md), [PHASE-1-STATUS.md](PHASE-1-STATUS.md), [IMPLEMENTATION-PROGRESS.md](IMPLEMENTATION-PROGRESS.md).
 
-### 1. Clone & Install
+## Run it locally
 
 ```bash
-git clone <repo-url>
-cd finance-platform-api
+git clone <repo-url> && cd Finance-Health
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate        # Windows PowerShell: venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-### 2. Configure Environment
-
-Copy `.env.example` to `.env` and update:
-
-```bash
-DATABASE_URL=postgresql://user:password@localhost:5432/finance_db
-SECRET_KEY=your-django-secret-key-here
-DEBUG=True  # False in production
-ALLOWED_HOSTS=localhost,127.0.0.1
-JWT_SECRET=your-jwt-secret-key
-JWT_EXPIRY_MINUTES=15
-REFRESH_TOKEN_DAYS=7
-```
-
-### 3. Database Setup
-
-```bash
+cp .env.example .env            # then edit it (see below)
 python manage.py migrate
-python manage.py createsuperuser
+python manage.py create_invite --label "me"   # prints a one-time sign-up code
+python manage.py runserver      # http://localhost:8000
 ```
 
-### 4. Run Locally
+Swagger UI is at `/api/docs/`, the schema at `/api/schema/`, and a health check at `/health/`.
+
+`SECRET_KEY`, `JWT_SECRET` and `ENCRYPTION_KEY` have no defaults: the app refuses to start without them. Make each one different (and `ENCRYPTION_KEY` at least 32 characters). Generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+
+The safe settings are the default when a variable is unset (`DEBUG` off, `SECURE_SSL_REDIRECT`, `SESSION_COOKIE_SECURE` and `CSRF_COOKIE_SECURE` on). For local work only, put `DEBUG=True` and those three flags as `False` in your own `.env`, plus either `DATABASE_URL` or the `DB_*` values for a local PostgreSQL. Never commit `.env`, and never put real keys, emails or account details in `.env.example`.
+
+## Tests
 
 ```bash
-python manage.py runserver
-# Server runs at http://localhost:8000
-# API docs at http://localhost:8000/api/docs/
+pip install -r requirements-test.txt
+python -m pytest -q
 ```
 
-## API Endpoints (Phase 1)
+Tests run on SQLite with `--nomigrations` and use their own fake keys (`test_settings.py`), so they neither need your `.env` nor exercise the migrations. CI covers the migrations on PostgreSQL.
 
-### Authentication
+## Deploying (Railway)
 
-- `POST /api/auth/register` — Create user account
-- `POST /api/auth/login` — Get JWT token
-- `POST /api/auth/refresh` — Refresh expired token
-- `POST /api/auth/logout` — Revoke tokens (optional)
-- `GET /api/auth/me` — Get current user profile
+Railway builds with nixpacks and is configured by `railway.toml`: `collectstatic` runs at build, `migrate` runs at start, just before gunicorn (a pre-deploy step was tried on staging and did not apply the migrations). `railway.toml` is what Railway follows; the `Procfile` is left over and is not what drives deploys here. Environment variables are set in the Railway dashboard, never in the repo. Click-by-click steps are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-### Accounts
+Production variables to check in Railway: `SECRET_KEY`, `JWT_SECRET` and `ENCRYPTION_KEY` (all set, all different), `DEBUG=False`, `NUM_PROXIES=1`, the three secure flags `True`, and `ALLOWED_HOSTS` / `CORS_ALLOWED_ORIGINS` limited to your own domains. Never use "Add Public Access" on the PostgreSQL service. Losing `ENCRYPTION_KEY` makes encrypted account numbers unreadable, so keep a copy somewhere private.
 
-- `GET /api/accounts` — List user's accounts
-- `POST /api/accounts` — Add new account (manual entry)
-- `GET /api/accounts/{id}` — Account details
-- `PATCH /api/accounts/{id}` — Update account name/metadata
-- `DELETE /api/accounts/{id}` — Remove account
+### Inviting a member
 
-### Upload & Import
+Sign-up needs a single-use code. Create one with `python manage.py create_invite --label "name" --days 7` (in Railway, run it from the service's shell or `railway run`). The code is printed once and only its hash is stored. The member sends it as `invite_code` in `POST /api/v1/auth/register/`.
 
-- `POST /api/upload` — Upload PDF/CSV statement
-  - Request: multipart form (file, bank_key, account_id)
-  - Response: { status, rows_processed, rows_imported, rows_deduplicated, errors }
-- `GET /api/upload/history` — Import history
-- `GET /api/upload/status/{task_id}` — Async import status
+## API (all under `/api/v1/`)
 
-### Transactions
+- Auth: `POST auth/register/` (needs `invite_code`), `auth/login/`, `auth/refresh/`, `auth/logout/`; `GET auth/me/`
+- Resources: `accounts/`, `transactions/` (plus `transactions/export/`), `categories/`, `rules/` (standard list/create/detail/update/delete)
+- Import: `POST import/upload/` (multipart: file, bank_key, account_id), `GET import/history/`, `GET import/status/<task_id>/`
+- Dashboard: `GET analytics/dashboard/`
 
-- `GET /api/transactions` — List transactions (with filters)
-  - Query params: `account_id`, `category_id`, `date_from`, `date_to`, `search`, `is_recurring`, `page`, `limit`
-- `PATCH /api/transactions/{id}` — Edit transaction (category, notes, flag)
-- `DELETE /api/transactions/{id}` — Delete transaction
-- `GET /api/transactions/export` — Export as CSV
+[API-SPEC.md](API-SPEC.md) and `/api/docs/` are the detailed references. Planned but not built: the `analytics/spending`, `recurring` and `outliers` endpoints.
 
-### Categorization
+## How it works
 
-- `GET /api/categories` — List categories
-- `GET /api/rules` — List categorization rules
-- `POST /api/rules` — Create rule
-- `PATCH /api/rules/{id}` — Update rule
-- `DELETE /api/rules/{id}` — Delete rule
+- **Imports:** PDF statements are matched by scanning the whole text for "date, date, description, amount" patterns (OCR can reorder lines); CSV uses per-bank column mappings. Statements are de-duplicated by SHA-256 hash and transactions by a hash of date, description and amount.
+- **Money rules** (net worth, money left this month, recurring and outlier detection, internal transfers) are defined in [FINANCIAL-DEFINITIONS.md](FINANCIAL-DEFINITIONS.md). Nothing here is personalised investment advice.
 
-### Dashboard & Analytics
+## Security: current state
 
-- `GET /api/dashboard` — Main dashboard metrics
-  - Returns: { money_left_this_month, net_worth, account_balances, category_breakdown, upcoming_payments }
-- `GET /api/analytics/spending` — Spending trends (chart data)
-- `GET /api/analytics/recurring` — Detected recurring charges
-- `GET /api/analytics/outliers` — Flagged unusual transactions
+- Each member only sees their own rows (per-user filtering on every query set, covered by `test_isolation.py`).
+- Account numbers are encrypted at rest with AES-256-GCM (random nonce per value, key from `ENCRYPTION_KEY`).
+- Sign-up is invite-only with single-use, expiring codes.
+- Login locks out after 5 failed attempts for 15 minutes (`LOGIN_LOCKOUT_ATTEMPTS`, `LOGIN_LOCKOUT_MINUTES`).
+- Access tokens last 15 minutes. Refresh tokens last 7 days, are stored hashed, rotate on use, and are revoked on logout.
+- Passwords use Django's default hasher (PBKDF2), not bcrypt.
+- The app will not start without its three secrets, and `DEBUG`, secure cookies and SSL redirect are safe by default.
 
-## Testing
+Known gaps are tracked in the security review; nothing here replaces a professional audit before real members' data goes in.
 
-```bash
-# Run all tests
-pytest
+## Not in this README on purpose
 
-# Run with coverage
-pytest --cov=src
-
-# Run specific app tests
-pytest src/apps/auth/tests.py
-
-# Watch mode (requires pytest-watch)
-ptw
-```
-
-## Key Implementation Notes
-
-### PDF Parsing
-
-Porting Finance Tracker's global-pattern approach:
-- Does NOT parse line-by-line (OCR can reorder lines)
-- Scans entire text for "date date description amount" patterns
-- Handles 5 different statement formats per Config.gs
-- Deduplicates using statement hash (SHA-256) to prevent re-importing
-
-### CSV Parsing
-
-Handles KOHO, RBC, TD formats with column mapping per Config.gs.
-
-### Deduplication
-
-- Statements deduplicated by content hash (SHA-256 of entire statement)
-- Transactions deduplicated by import_id (hash of date+description+amount)
-- Prevents duplicate imports even if same file uploaded twice
-
-### Financial Algorithms
-
-Ported from Finance Tracker:
-- **Net Worth** = sum(debit/savings balances) − sum(credit card balances)  
-  Uses most-recent statement by **billing period end date**, not import order
-- **Money Left This Month** = total income − total spending (excluding internal transfers)
-- **Recurring Detection**:
-  - Bills (Rent, Utilities, Insurance, etc.): recurring if ≥2 distinct months
-  - Other categories: recurring if ≥3 occurrences within ±10% of median amount
-- **Outlier Flagging**: IQR-based (configurable multiplier, 1.5x default)
-- **Internal Transfers**: excluded from spending/recurring/outlier detection
-
-### Security
-
-- Passwords: bcrypt (12+ rounds)
-- Account numbers: AES-256-GCM encrypted per-user
-- Transactions: plaintext (user owns data; assume DB compromise)
-- Auth: JWT with 15-min expiry + 7-day refresh tokens (rotated on use)
-- Rate limiting: 5 failed logins → 15-min lockout
-- Audit log: all sensitive field access
-
-### Deployment
-
-Target: **Railway** or **Render** (free tier)
-- PostgreSQL: 5GB free
-- Python runtime: included
-- Environment variables: stored securely
-- See `DEPLOYMENT.md` for step-by-step
-
-## Current Status
-
-- [x] Schema design & migration files
-- [x] Django project skeleton
-- [x] models.py (all tables)
-- [ ] Serializers (in progress)
-- [ ] Views & endpoints (in progress)
-- [ ] PDF/CSV parsers (in progress)
-- [ ] Auth & JWT (in progress)
-- [ ] Rate limiting (in progress)
-- [ ] Tests (in progress)
-- [ ] Swagger/OpenAPI spec (in progress)
-- [ ] Deployment setup (in progress)
-
-## Questions for Ledger
-
-- Confirm financial algorithms match Design Director's expectations
-- Verify encryption/security spec before finalization
-- Review test vectors for edge cases
-
----
-
-**Next:** Implement authentication endpoints, transaction CRUD, and file upload flow.
+Real emails, passwords, keys, account numbers, balances and pay figures live only in Railway variables and private notes.

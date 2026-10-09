@@ -1,6 +1,6 @@
 # Minimal test dependencies
 Django==5.2.17
-djangorestframework==3.14.0
+djangorestframework==3.17.2
 django-cors-headers==4.3.1
 django-environ==0.10.0
 python-decouple==3.8
@@ -9,7 +9,7 @@ dj-database-url==2.1.0
 PyJWT==2.15.1
 cryptography==50.0.2
 bcrypt==4.1.1
-pytest==7.4.3
+pytest==9.0.3
 pytest-django==4.7.0
 pytest-cov==4.1.0
 factory-boy==3.3.0
