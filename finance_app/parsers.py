@@ -339,8 +339,12 @@ class CSVParser:
         start_idx = 1 if config['hasHeader'] else 0
 
         transactions = []
-        for row in rows[start_idx:]:
+        bad_rows = []
+        for line_no, row in enumerate(rows[start_idx:], start=start_idx + 1):
+            if not any(cell.strip() for cell in row):
+                continue  # blank line
             if len(row) < 3:
+                bad_rows.append(line_no)
                 continue
 
             try:
@@ -364,8 +368,16 @@ class CSVParser:
 
                 transactions.append(Transaction(date, desc.strip(), amount))
             except Exception as e:
-                logger.warning(f"Failed to parse CSV row: {row}: {e}")
+                # Row content is not logged: it is financial data
+                logger.warning(f"Failed to parse CSV line {line_no}: {type(e).__name__}")
+                bad_rows.append(line_no)
                 continue
+
+        if bad_rows:
+            # Skipping rows would silently drop money from the import, so refuse the file
+            shown = ', '.join(str(n) for n in bad_rows[:10])
+            more = f' and {len(bad_rows) - 10} more' if len(bad_rows) > 10 else ''
+            raise ValueError(f"Could not read CSV line(s) {shown}{more}; nothing was imported")
 
         return ParseResult(transactions, reconciled=True)
 
@@ -385,8 +397,8 @@ class CSVParser:
             except ValueError:
                 continue
 
-        logger.warning(f"Could not parse CSV date: {date_str}")
-        return datetime.now()
+        # A guessed date would put the transaction in the wrong month
+        raise ValueError(f"Unrecognised date format: {date_str!r}")
 
 
 # ============== DEDUPLICATION ==============
