@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-test.txt
+      - name: Tests (SQLite)
+        run: python -m pytest -q
+
+  postgres-migrate:
+    # Tests run on SQLite with --nomigrations, so this is the only place
+    # the real migrations meet Postgres before they reach Railway.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: finance_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:ci@localhost:5432/finance_ci
+      SECRET_KEY: ci-only-not-a-secret
+      DEBUG: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python manage.py migrate --noinput
+      - name: Pending model changes without a migration (report only)
+        run: python manage.py makemigrations --check --dry-run
+        continue-on-error: true
+      - name: Deploy settings check (report only)
+        run: python manage.py check --deploy
+        continue-on-error: true
+
+  dependency-audit:
+    # Report only until the open advisories are handled (security batch 2).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements.txt
